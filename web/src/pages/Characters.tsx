@@ -97,6 +97,16 @@ function CharacterCard({ character }: { character: Character }) {
       void client.invalidateQueries({ queryKey: ["voices", character.id] });
     },
   });
+  const removeCharacter = useMutation({
+    mutationFn: () =>
+      api(`/characters/${character.id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      void client.invalidateQueries({
+        queryKey: ["characters", character.project_id],
+      }),
+  });
   async function uploadReference(file: File | undefined) {
     if (!file) return;
     const form = new FormData();
@@ -120,15 +130,29 @@ function CharacterCard({ character }: { character: Character }) {
     <article className="card">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-bold">{character.name}</h2>
-        <label className="button cursor-pointer">
-          Add reference image
-          <input
-            className="sr-only"
-            type="file"
-            accept="image/png,image/jpeg"
-            onChange={(event) => void uploadReference(event.target.files?.[0])}
-          />
-        </label>
+        <div className="flex flex-wrap gap-2">
+          <label className="button cursor-pointer">
+            Add reference image
+            <input
+              className="sr-only"
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={(event) => void uploadReference(event.target.files?.[0])}
+            />
+          </label>
+          <button
+            className="button"
+            aria-label={`Delete character ${character.name}`}
+            disabled={removeCharacter.isPending}
+            onClick={() => {
+              if (window.confirm(`Delete character ${character.name}?`)) {
+                removeCharacter.mutate();
+              }
+            }}
+          >
+            Delete character
+          </button>
+        </div>
       </div>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <label>
@@ -173,14 +197,12 @@ function CharacterCard({ character }: { character: Character }) {
           </button>
         </div>
         {voices.map((voice) => (
-          <div className="mt-3 flex items-center gap-3" key={voice.id}>
-            <span>
-              {voice.provider} · {voice.model} · {voice.language}
-            </span>
-            <button className="button" onClick={() => void previewVoice(voice)}>
-              Preview
-            </button>
-          </div>
+          <VoiceRow
+            key={voice.id}
+            voice={voice}
+            characterName={character.name}
+            onPreview={() => void previewVoice(voice)}
+          />
         ))}
         {preview && (
           <audio
@@ -193,5 +215,94 @@ function CharacterCard({ character }: { character: Character }) {
         )}
       </div>
     </article>
+  );
+}
+
+function VoiceRow({
+  voice,
+  characterName,
+  onPreview,
+}: {
+  voice: VoiceProfile;
+  characterName: string;
+  onPreview: () => void;
+}) {
+  const client = useQueryClient();
+  const [consent, setConsent] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  async function uploadReference(file: File | undefined) {
+    if (!file || !consent) return;
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      setUploadError("");
+      await api(
+        `/voice-profiles/${voice.id}/reference-audio?consent_acknowledged=true`,
+        { method: "POST", body: form },
+      );
+      await client.invalidateQueries({ queryKey: ["voices", voice.character_id] });
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Upload failed");
+    }
+  }
+
+  const remove = useMutation({
+    mutationFn: () => api(`/voice-profiles/${voice.id}`, { method: "DELETE" }),
+    onSuccess: () =>
+      void client.invalidateQueries({ queryKey: ["voices", voice.character_id] }),
+  });
+
+  return (
+    <div className="mt-3 rounded border border-slate-700 p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span>
+          {voice.provider} · {voice.model} · {voice.language}
+        </span>
+        <button className="button" onClick={onPreview}>
+          Preview
+        </button>
+        <button
+          className="button"
+          aria-label={`Delete voice for ${characterName}`}
+          disabled={remove.isPending}
+          onClick={() => {
+            if (window.confirm(`Delete this voice profile for ${characterName}?`)) {
+              remove.mutate();
+            }
+          }}
+        >
+          Delete voice
+        </button>
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={consent}
+          onChange={(event) => setConsent(event.target.checked)}
+        />
+        I confirm I have consent to use this voice reference.
+      </label>
+      <label
+        className={`button mt-2 inline-block ${consent ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
+      >
+        Add voice reference audio
+        <input
+          className="sr-only"
+          type="file"
+          accept="audio/wav,audio/mpeg"
+          disabled={!consent}
+          onChange={(event) => void uploadReference(event.target.files?.[0])}
+        />
+      </label>
+      {voice.reference_audio && (
+        <p className="mt-2 text-sm text-teal-200">Voice reference recorded.</p>
+      )}
+      {uploadError && (
+        <p className="mt-2 text-sm text-red-300" role="alert">
+          Voice reference upload failed: {uploadError}
+        </p>
+      )}
+    </div>
   );
 }

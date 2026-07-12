@@ -56,6 +56,8 @@ uv run flipthis-smoke
 pnpm lint
 pnpm test
 pnpm build
+pnpm --dir web exec playwright install chromium
+pnpm e2e
 ```
 
 See [current status](docs/current-status.md), [architecture](docs/architecture.md), and the

@@ -82,6 +82,7 @@ pnpm install --frozen-lockfile
 pnpm lint
 pnpm test
 pnpm build
+pnpm e2e
 ```
 
 Also validate API startup, one CPU worker, two separately configured GPU workers, database restart recovery, job cancellation/retry, and a final `ffprobe` of the smoke render.

@@ -14,3 +14,18 @@ Before a commit, run every command in `AGENTS.md`. Add a focused regression test
 failure and rerun the smoke pipeline for media/worker changes. At every coherent phase boundary,
 update `docs/current-status.md` and relevant ADRs before committing. Preserve the nested `skills`
 repository and `skills.7z` as user-owned material.
+
+## Browser workflow
+
+Install the Playwright Chromium runtime once, then run the isolated core workflow:
+
+```bash
+pnpm --dir web exec playwright install chromium
+pnpm e2e
+```
+
+The script refuses to reuse ports 8000 or 5173, creates a temporary Alembic database and project
+directory under ignored `output/playwright/`, starts its own API, web server, and CPU worker, and
+cleans them up. It exercises project creation, character/voice creation, story planning, a completed
+mock render and MP4 response, and isolated shot regeneration. Failure logs and Playwright artifacts
+remain under `output/playwright/`; successful runtime media is removed.

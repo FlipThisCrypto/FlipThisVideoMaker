@@ -69,6 +69,18 @@ export function ProjectEditor() {
       void client.invalidateQueries({ queryKey: ["shots", id] });
     },
   });
+  const addScene = useMutation({
+    mutationFn: () =>
+      api<Scene>(`/projects/${id}/scenes`, {
+        method: "POST",
+        body: JSON.stringify({
+          number: Math.max(0, ...scenes.map((scene) => scene.number)) + 1,
+          title: "New scene",
+        }),
+      }),
+    onSuccess: () =>
+      void client.invalidateQueries({ queryKey: ["scenes", id] }),
+  });
   const originalStory = project?.original_story;
   const storedProfile = project?.resolution_profile;
   useEffect(() => {
@@ -230,10 +242,26 @@ export function ProjectEditor() {
           </button>
         </div>
       </section>
-      <h2 className="mb-3 text-xl font-bold">Storyboard</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xl font-bold">Storyboard</h2>
+        <button
+          className="button"
+          disabled={addScene.isPending}
+          onClick={() => addScene.mutate()}
+        >
+          Add scene
+        </button>
+      </div>
       <div className="mb-5 grid gap-4 md:grid-cols-2">
-        {scenes.map((scene) => (
-          <SceneEditor key={scene.id} projectId={id!} scene={scene} />
+        {scenes.map((scene, index) => (
+          <SceneEditor
+            key={scene.id}
+            projectId={id!}
+            scene={scene}
+            shots={shots.filter((shot) => shot.scene_id === scene.id)}
+            canMoveUp={index > 0}
+            canMoveDown={index < scenes.length - 1}
+          />
         ))}
       </div>
       {shots.length === 0 && (
@@ -242,15 +270,21 @@ export function ProjectEditor() {
         </p>
       )}
       <div className="grid gap-4 md:grid-cols-2">
-        {shots.map((shot) => (
-          <ShotCard
-            key={shot.id}
-            projectId={id!}
-            shot={shot}
-            renderProfiles={configuredProfiles}
-            defaultRenderProfile={project.resolution_profile}
-          />
-        ))}
+        {shots.map((shot) => {
+          const siblings = shots.filter((item) => item.scene_id === shot.scene_id);
+          const index = siblings.findIndex((item) => item.id === shot.id);
+          return (
+            <ShotCard
+              key={shot.id}
+              projectId={id!}
+              shot={shot}
+              renderProfiles={configuredProfiles}
+              defaultRenderProfile={project.resolution_profile}
+              canMoveUp={index > 0}
+              canMoveDown={index >= 0 && index < siblings.length - 1}
+            />
+          );
+        })}
       </div>
     </>
   );
@@ -261,24 +295,36 @@ function ShotCard({
   shot,
   renderProfiles,
   defaultRenderProfile,
+  canMoveUp,
+  canMoveDown,
 }: {
   projectId: string;
   shot: Shot;
   renderProfiles: RenderProfile[];
   defaultRenderProfile: string;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }) {
   const client = useQueryClient();
   const [prompt, setPrompt] = useState(shot.prompt);
   const [negativePrompt, setNegativePrompt] = useState(shot.negative_prompt);
   const [dialogue, setDialogue] = useState(shot.dialogue);
+  const [narration, setNarration] = useState(shot.narration);
   const [speaker, setSpeaker] = useState(shot.speaker ?? "");
+  const [shotType, setShotType] = useState(shot.shot_type);
   const [duration, setDuration] = useState(shot.duration);
   const [provider, setProvider] = useState(shot.provider);
+  const [model, setModel] = useState(shot.model);
   const [seed, setSeed] = useState(shot.seed);
   const [transition, setTransition] = useState(shot.transition_type);
   const [overlap, setOverlap] = useState(shot.overlap_frame_count);
   const [framing, setFraming] = useState(shot.camera.framing ?? "medium");
   const [movement, setMovement] = useState(shot.camera.movement ?? "static");
+  const initialCandidateCount =
+    typeof shot.generation_settings.candidate_count === "number"
+      ? shot.generation_settings.candidate_count
+      : 1;
+  const [candidateCount, setCandidateCount] = useState(initialCandidateCount);
   const save = useMutation({
     mutationFn: () =>
       api(`/shots/${shot.id}`, {
@@ -287,18 +333,60 @@ function ShotCard({
           prompt,
           negative_prompt: negativePrompt,
           dialogue,
+          narration,
           speaker: speaker || null,
+          shot_type: shotType,
           duration,
           provider,
+          model,
           seed,
           transition_type: transition,
           overlap_frame_count: overlap,
           camera: { ...shot.camera, framing, movement },
+          generation_settings: {
+            ...shot.generation_settings,
+            candidate_count: candidateCount,
+          },
         }),
       }),
     onSuccess: () =>
       void client.invalidateQueries({ queryKey: ["shots", projectId] }),
   });
+  const move = useMutation({
+    mutationFn: (direction: "up" | "down") =>
+      api(`/shots/${shot.id}/move`, {
+        method: "POST",
+        body: JSON.stringify({ direction }),
+      }),
+    onSuccess: () =>
+      void client.invalidateQueries({ queryKey: ["shots", projectId] }),
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/shots/${shot.id}`, { method: "DELETE" }),
+    onSuccess: () =>
+      void client.invalidateQueries({ queryKey: ["shots", projectId] }),
+  });
+  const approve = useMutation({
+    mutationFn: () => api(`/shots/${shot.id}/approve`, { method: "POST" }),
+    onSuccess: () =>
+      void client.invalidateQueries({ queryKey: ["shots", projectId] }),
+  });
+  const isDirty =
+    prompt !== shot.prompt ||
+    negativePrompt !== shot.negative_prompt ||
+    dialogue !== shot.dialogue ||
+    narration !== shot.narration ||
+    speaker !== (shot.speaker ?? "") ||
+    shotType !== shot.shot_type ||
+    duration !== shot.duration ||
+    provider !== shot.provider ||
+    model !== shot.model ||
+    seed !== shot.seed ||
+    transition !== shot.transition_type ||
+    overlap !== shot.overlap_frame_count ||
+    framing !== (shot.camera.framing ?? "medium") ||
+    movement !== (shot.camera.movement ?? "static") ||
+    candidateCount !== initialCandidateCount;
   return (
     <article className="card">
       <div className="flex justify-between">
@@ -328,11 +416,27 @@ function ShotCard({
           />
         </label>
         <label>
+          <span className="text-sm">Shot type</span>
+          <input
+            className="field"
+            value={shotType}
+            onChange={(event) => setShotType(event.target.value)}
+          />
+        </label>
+        <label>
           <span className="text-sm">Dialogue</span>
           <input
             className="field"
             value={dialogue}
             onChange={(e) => setDialogue(e.target.value)}
+          />
+        </label>
+        <label className="md:col-span-2">
+          <span className="text-sm">Narration</span>
+          <input
+            className="field"
+            value={narration}
+            onChange={(event) => setNarration(event.target.value)}
           />
         </label>
         <label>
@@ -358,6 +462,20 @@ function ShotCard({
             onChange={(e) => setProvider(e.target.value)}
           />
         </label>
+        <label>
+          <span className="text-sm">Model</span>
+          <input
+            className="field"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+          />
+        </label>
+        <NumberField
+          label="Candidate count"
+          value={candidateCount}
+          setValue={setCandidateCount}
+          min={1}
+        />
         <label>
           <span className="text-sm">Transition</span>
           <select
@@ -395,13 +513,52 @@ function ShotCard({
           />
         </label>
       </div>
-      <button
-        className="button mb-3"
-        disabled={save.isPending || prompt === shot.prompt}
-        onClick={() => save.mutate()}
-      >
-        Save shot
-      </button>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button
+          className="button"
+          disabled={save.isPending || !isDirty}
+          onClick={() => save.mutate()}
+        >
+          Save shot
+        </button>
+        {shot.approval_state !== "approved" && (
+          <button
+            className="button"
+            disabled={approve.isPending}
+            onClick={() => approve.mutate()}
+          >
+            Approve shot
+          </button>
+        )}
+        <button
+          className="button"
+          aria-label={`Move shot ${shot.sequence_number} up`}
+          disabled={!canMoveUp || move.isPending}
+          onClick={() => move.mutate("up")}
+        >
+          Move up
+        </button>
+        <button
+          className="button"
+          aria-label={`Move shot ${shot.sequence_number} down`}
+          disabled={!canMoveDown || move.isPending}
+          onClick={() => move.mutate("down")}
+        >
+          Move down
+        </button>
+        <button
+          className="button"
+          aria-label={`Delete shot ${shot.sequence_number}`}
+          disabled={remove.isPending}
+          onClick={() => {
+            if (window.confirm(`Delete shot ${shot.sequence_number}?`)) {
+              remove.mutate();
+            }
+          }}
+        >
+          Delete shot
+        </button>
+      </div>
       <p>
         {shot.speaker && <b>{shot.speaker}: </b>}
         {shot.dialogue || "No dialogue"}
@@ -459,9 +616,15 @@ function NumberField({
 function SceneEditor({
   projectId,
   scene,
+  shots,
+  canMoveUp,
+  canMoveDown,
 }: {
   projectId: string;
   scene: Scene;
+  shots: Shot[];
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }) {
   const client = useQueryClient();
   const [title, setTitle] = useState(scene.title);
@@ -475,6 +638,38 @@ function SceneEditor({
       }),
     onSuccess: () =>
       void client.invalidateQueries({ queryKey: ["scenes", projectId] }),
+  });
+  const addShot = useMutation({
+    mutationFn: () =>
+      api<Shot>(`/scenes/${scene.id}/shots`, {
+        method: "POST",
+        body: JSON.stringify({
+          sequence_number:
+            Math.max(0, ...shots.map((shot) => shot.sequence_number)) + 1,
+          duration: 3,
+          prompt: "New storyboard shot",
+        }),
+      }),
+    onSuccess: () =>
+      void client.invalidateQueries({ queryKey: ["shots", projectId] }),
+  });
+  const move = useMutation({
+    mutationFn: (direction: "up" | "down") =>
+      api(`/scenes/${scene.id}/move`, {
+        method: "POST",
+        body: JSON.stringify({ direction }),
+      }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["scenes", projectId] });
+      void client.invalidateQueries({ queryKey: ["shots", projectId] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/scenes/${scene.id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["scenes", projectId] });
+      void client.invalidateQueries({ queryKey: ["shots", projectId] });
+    },
   });
   return (
     <section className="card">
@@ -497,9 +692,51 @@ function SceneEditor({
         value={lighting}
         onChange={(e) => setLighting(e.target.value)}
       />
-      <button className="button mt-2" onClick={() => save.mutate()}>
-        Save scene
-      </button>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button className="button" onClick={() => save.mutate()}>
+          Save scene
+        </button>
+        <button
+          className="button"
+          aria-label={`Add shot to scene ${scene.number}`}
+          disabled={addShot.isPending}
+          onClick={() => addShot.mutate()}
+        >
+          Add shot
+        </button>
+        <button
+          className="button"
+          aria-label={`Move scene ${scene.number} up`}
+          disabled={!canMoveUp || move.isPending}
+          onClick={() => move.mutate("up")}
+        >
+          Move up
+        </button>
+        <button
+          className="button"
+          aria-label={`Move scene ${scene.number} down`}
+          disabled={!canMoveDown || move.isPending}
+          onClick={() => move.mutate("down")}
+        >
+          Move down
+        </button>
+        <button
+          className="button"
+          aria-label={`Delete scene ${scene.number}`}
+          disabled={remove.isPending}
+          onClick={() => {
+            if (
+              window.confirm(
+                `Delete scene ${scene.number} and its ${shots.length} shots?`,
+              )
+            ) {
+              remove.mutate();
+            }
+          }}
+        >
+          Delete scene
+        </button>
+      </div>
     </section>
   );
 }

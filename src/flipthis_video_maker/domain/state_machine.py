@@ -20,7 +20,7 @@ TRANSITIONS: dict[ShotStatus, set[ShotStatus]] = {
     ShotStatus.LIPSYNC_READY: {ShotStatus.CONTINUITY_PENDING, ShotStatus.QA_PENDING},
     ShotStatus.CONTINUITY_PENDING: {ShotStatus.CONTINUITY_READY, ShotStatus.FAILED},
     ShotStatus.CONTINUITY_READY: {ShotStatus.QA_PENDING},
-    ShotStatus.QA_PENDING: {ShotStatus.COMPLETE, ShotStatus.QA_FAILED},
+    ShotStatus.QA_PENDING: {ShotStatus.COMPLETE, ShotStatus.QA_FAILED, ShotStatus.FAILED},
     ShotStatus.QA_FAILED: {ShotStatus.VIDEO_PENDING, ShotStatus.COMPLETE},
     ShotStatus.FAILED: {
         ShotStatus.AUDIO_PENDING,

@@ -14,6 +14,7 @@ from flipthis_video_maker.api.schemas import (
     CandidateRead,
     CharacterPatch,
     CharacterRead,
+    MoveRequest,
     SceneCreate,
     ScenePatch,
     SceneRead,
@@ -257,6 +258,21 @@ def delete_scene(scene_id: str, db: DB) -> None:
     db.commit()
 
 
+@router.post("/scenes/{scene_id}/move", response_model=SceneRead)
+def move_scene(scene_id: str, body: MoveRequest, db: DB) -> Scene:
+    scene = require(db, Scene, scene_id)
+    siblings = list(
+        db.scalars(
+            select(Scene)
+            .where(Scene.project_id == scene.project_id)
+            .order_by(Scene.number, Scene.created_at, Scene.id)
+        )
+    )
+    _move_ordered(siblings, scene, body.direction, "number")
+    db.commit()
+    return scene
+
+
 @router.post("/scenes/{scene_id}/shots", response_model=ShotRead, status_code=201)
 def create_shot(scene_id: str, body: ShotCreate, db: DB) -> Shot:
     require(db, Scene, scene_id)
@@ -275,6 +291,21 @@ def get_shot(shot_id: str, db: DB) -> Shot:
 def delete_shot(shot_id: str, db: DB) -> None:
     db.delete(require(db, Shot, shot_id))
     db.commit()
+
+
+@router.post("/shots/{shot_id}/move", response_model=ShotRead)
+def move_shot(shot_id: str, body: MoveRequest, db: DB) -> Shot:
+    shot = require(db, Shot, shot_id)
+    siblings = list(
+        db.scalars(
+            select(Shot)
+            .where(Shot.scene_id == shot.scene_id)
+            .order_by(Shot.sequence_number, Shot.created_at, Shot.id)
+        )
+    )
+    _move_ordered(siblings, shot, body.direction, "sequence_number")
+    db.commit()
+    return shot
 
 
 @router.post("/shots/{shot_id}/regenerate", status_code=202)
@@ -373,6 +404,25 @@ def rate_candidate(candidate_id: str, body: CandidateRating, db: DB) -> Candidat
     candidate.user_rating = body.rating
     db.commit()
     return candidate
+
+
+def _move_ordered[T](
+    items: list[T],
+    selected: T,
+    direction: str,
+    order_attribute: str,
+) -> None:
+    for position, item in enumerate(items, 1):
+        setattr(item, order_attribute, position)
+    current = items.index(selected)
+    target = current - 1 if direction == "up" else current + 1
+    if target < 0 or target >= len(items):
+        return
+    other = items[target]
+    current_value = getattr(selected, order_attribute)
+    target_value = getattr(other, order_attribute)
+    setattr(selected, order_attribute, target_value)
+    setattr(other, order_attribute, current_value)
 
 
 async def _read_upload(file: UploadFile, settings: Settings) -> bytes:

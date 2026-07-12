@@ -597,7 +597,7 @@ while True:
     db.refresh(job)
     assert job.state == JobState.CANCELLED.value
     assert terminated.is_file()
-    assert not list(
+    completed_stage_assets = list(
         db.scalars(
             select(Asset).where(
                 Asset.project_id == project.id,
@@ -605,3 +605,7 @@ while True:
             )
         )
     )
+    assert len(completed_stage_assets) == 1
+    assert Path(completed_stage_assets[0].file_path).is_file()
+    assert completed_stage_assets[0].checksum == checksum(Path(completed_stage_assets[0].file_path))
+    assert not list(db.scalars(select(Candidate).where(Candidate.shot_id.is_not(None))))

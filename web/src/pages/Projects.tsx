@@ -34,6 +34,12 @@ export function Projects() {
       void client.invalidateQueries({ queryKey: ["projects"] });
     },
   });
+  const remove = useMutation({
+    mutationFn: (projectId: string) =>
+      api(`/projects/${projectId}`, { method: "DELETE" }),
+    onSuccess: () =>
+      void client.invalidateQueries({ queryKey: ["projects"] }),
+  });
   useEffect(() => {
     if (!profileCatalog.data || resolutionProfile) return;
     setResolutionProfile(profileCatalog.data.default_profile);
@@ -93,17 +99,31 @@ export function Projects() {
       </form>
       <div className="grid gap-4 md:grid-cols-2">
         {data.map((project) => (
-          <Link
-            className="card hover:border-accent"
-            to={`/projects/${project.id}`}
-            key={project.id}
-          >
-            <h2 className="text-xl font-bold">{project.name}</h2>
-            <p className="text-slate-400">
-              {project.status} · {project.target_duration}s ·{" "}
-              {project.resolution_profile}
-            </p>
-          </Link>
+          <article className="card" key={project.id}>
+            <Link className="block hover:text-accent" to={`/projects/${project.id}`}>
+              <h2 className="text-xl font-bold">{project.name}</h2>
+              <p className="text-slate-400">
+                {project.status} · {project.target_duration}s ·{" "}
+                {project.resolution_profile}
+              </p>
+            </Link>
+            <button
+              className="button mt-3"
+              aria-label={`Delete project ${project.name}`}
+              disabled={remove.isPending}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Remove project ${project.name} from the library? Generated files remain on disk.`,
+                  )
+                ) {
+                  remove.mutate(project.id);
+                }
+              }}
+            >
+              Delete project
+            </button>
+          </article>
         ))}
       </div>
     </>

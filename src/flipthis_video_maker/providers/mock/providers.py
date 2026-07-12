@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from flipthis_video_maker.config.settings import get_settings
-from flipthis_video_maker.media.ffmpeg import run
+from flipthis_video_maker.media.ffmpeg import MediaCancelled, run
 from flipthis_video_maker.providers.base.models import (
     Capability,
     ImageRequest,
@@ -185,6 +185,9 @@ class MockVideoProvider:
 
 
 class MockLipSyncProvider:
+    def __init__(self, cancel_requested: Callable[[], bool] | None = None) -> None:
+        self.cancel_requested = cancel_requested
+
     def info(self) -> ProviderInfo:
         return ProviderInfo(
             id="mock-lipsync",
@@ -199,12 +202,19 @@ class MockLipSyncProvider:
         return {"ok": True}
 
     async def process(self, video: Path, _audio: Path, output: Path) -> Path:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(video, output)
-        return output
+        return await asyncio.to_thread(
+            _atomic_passthrough,
+            video,
+            output,
+            self.cancel_requested,
+            "lip-sync",
+        )
 
 
 class MockInterpolationProvider:
+    def __init__(self, cancel_requested: Callable[[], bool] | None = None) -> None:
+        self.cancel_requested = cancel_requested
+
     def info(self) -> ProviderInfo:
         return ProviderInfo(
             id="mock-interpolation",
@@ -219,6 +229,36 @@ class MockInterpolationProvider:
         return {"ok": True}
 
     async def process(self, video: Path, output: Path) -> Path:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(video, output)
-        return output
+        return await asyncio.to_thread(
+            _atomic_passthrough,
+            video,
+            output,
+            self.cancel_requested,
+            "interpolation",
+        )
+
+
+def _atomic_passthrough(
+    source: Path,
+    output: Path,
+    cancel_requested: Callable[[], bool] | None,
+    operation: str,
+) -> Path:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.stem}-{uuid.uuid4().hex}.partial{output.suffix}")
+    try:
+        if cancel_requested and cancel_requested():
+            raise MediaCancelled(f"Mock {operation} cancelled before start")
+        with source.open("rb") as source_handle, temporary.open("xb") as output_handle:
+            while chunk := source_handle.read(1024 * 1024):
+                if cancel_requested and cancel_requested():
+                    raise MediaCancelled(f"Mock {operation} cancelled")
+                output_handle.write(chunk)
+        shutil.copystat(source, temporary)
+        if cancel_requested and cancel_requested():
+            raise MediaCancelled(f"Mock {operation} cancelled before completion")
+        temporary.replace(output)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return output

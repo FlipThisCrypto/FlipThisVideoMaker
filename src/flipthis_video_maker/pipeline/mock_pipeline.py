@@ -31,6 +31,7 @@ from flipthis_video_maker.media.render import (
     write_manifest,
     write_subtitles,
 )
+from flipthis_video_maker.pipeline.postprocessing import apply_mock_postprocessing
 from flipthis_video_maker.pipeline.provider_execution import (
     CleanupCallback,
     FallbackCallback,
@@ -43,6 +44,8 @@ from flipthis_video_maker.providers.base.errors import (
 from flipthis_video_maker.providers.base.models import ImageRequest, TTSRequest, VideoRequest
 from flipthis_video_maker.providers.mock.providers import (
     MockImageProvider,
+    MockInterpolationProvider,
+    MockLipSyncProvider,
     MockTTSProvider,
     MockVideoProvider,
 )
@@ -79,6 +82,8 @@ class MockPipeline:
         self.images = MockImageProvider()
         self.tts = MockTTSProvider()
         self.video = MockVideoProvider(cancel_requested)
+        self.lip_sync = MockLipSyncProvider(cancel_requested)
+        self.interpolation = MockInterpolationProvider(cancel_requested)
 
     async def run(self, project_id: str, *, render_profile_name: str | None = None) -> Render:
         project = self.db.get(Project, project_id)
@@ -113,6 +118,7 @@ class MockPipeline:
         root = Path(project.root_asset_directory)
         run_id = uuid.uuid4().hex
         clips: list[Path] = []
+        selected_clip_asset_ids: list[str] = []
         transitions: list[tuple[str, int]] = []
         actual_ends: list[Path] = []
         previous_shot: Shot | None = None
@@ -244,6 +250,7 @@ class MockPipeline:
                 shot.continuity_target_frame_id = end_asset.id
 
                 audio_path: Path | None = None
+                audio_asset: Asset | None = None
                 if shot.dialogue:
                     audio_path = shot_root / "audio" / f"dialogue-{shot.seed}.wav"
                     await self.tts.synthesize(
@@ -253,7 +260,7 @@ class MockPipeline:
                             voice=shot.speaker or "narrator",
                         )
                     )
-                    register_asset(
+                    audio_asset = register_asset(
                         self.db,
                         project_id=project.id,
                         shot_id=shot.id,
@@ -267,6 +274,17 @@ class MockPipeline:
                     if not rerun:
                         self._transition(shot, ShotStatus.AUDIO_READY)
                         self._transition(shot, ShotStatus.KEYFRAMES_PENDING)
+
+                video_input_asset_ids = [
+                    item
+                    for item in (
+                        shot.planned_start_frame_id,
+                        shot.continuity_source_frame_id,
+                        end_asset.id,
+                        audio_asset.id if audio_asset is not None else None,
+                    )
+                    if item
+                ]
 
                 if not rerun:
                     self._transition(shot, ShotStatus.KEYFRAMES_READY)
@@ -325,6 +343,70 @@ class MockPipeline:
                         "render_profile_execution": execution_payload,
                     }
                     self._check_cancelled()
+                    base_quality = analyze_video(
+                        output,
+                        shot.duration,
+                        profile.width,
+                        profile.height,
+                        profile.fps,
+                        audio_expected=True,
+                        cancel_requested=self.cancel_requested,
+                        audible_audio_expected=bool(shot.dialogue),
+                    )
+                    video_asset = register_asset(
+                        self.db,
+                        project_id=project.id,
+                        shot_id=shot.id,
+                        kind="video_candidate",
+                        path=output,
+                        provider="mock-video",
+                        model="ffmpeg-xfade-v1",
+                        prompt=shot.prompt,
+                        seed=shot.seed,
+                        parents=video_input_asset_ids,
+                        generation_parameters=profile_provenance,
+                        cancel_requested=self.cancel_requested,
+                    )
+                    self._transition(shot, ShotStatus.VIDEO_READY)
+                    self.db.commit()
+
+                    def transition_postprocessing(
+                        target: ShotStatus,
+                        current_shot: Shot = shot,
+                    ) -> None:
+                        self._transition(current_shot, target)
+
+                    postprocess = await apply_mock_postprocessing(
+                        self.db,
+                        project_id=project.id,
+                        shot=shot,
+                        video_path=output,
+                        video_asset=video_asset,
+                        audio_path=audio_path,
+                        audio_asset=audio_asset,
+                        output_directory=shot_root / "postprocessing",
+                        settings=shot.generation_settings,
+                        expected_duration=shot.duration,
+                        width=profile.width,
+                        height=profile.height,
+                        fps=profile.fps,
+                        prompt=shot.prompt,
+                        seed=shot.seed,
+                        profile_provenance=profile_provenance,
+                        base_quality=base_quality,
+                        audible_audio_expected=bool(shot.dialogue),
+                        lip_sync=self.lip_sync,
+                        interpolation=self.interpolation,
+                        transition=transition_postprocessing,
+                        cancel_requested=self.cancel_requested,
+                    )
+                    output = postprocess.output_path
+                    selected_video_asset = postprocess.output_asset
+                    qa = postprocess.quality
+                    postprocessing = postprocess.metadata
+                    self._transition(shot, ShotStatus.QA_PENDING)
+                    self.db.commit()
+                    self._check_cancelled()
                     actual_start_path = shot_root / "frames" / f"actual-start-{shot.seed}.png"
                     actual_end_path = shot_root / "frames" / f"actual-end-{shot.seed}.png"
                     extract_frame(
@@ -338,35 +420,15 @@ class MockPipeline:
                         last=True,
                         cancel_requested=self.cancel_requested,
                     )
-                    qa = analyze_video(
-                        output,
-                        shot.duration,
-                        profile.width,
-                        profile.height,
-                        profile.fps,
-                        audio_expected=True,
-                        cancel_requested=self.cancel_requested,
-                    )
-                    video_asset = register_asset(
-                        self.db,
-                        project_id=project.id,
-                        shot_id=shot.id,
-                        kind="video_candidate",
-                        path=output,
-                        provider="mock-video",
-                        model="ffmpeg-xfade-v1",
-                        prompt=shot.prompt,
-                        seed=shot.seed,
-                        generation_parameters=profile_provenance,
-                        cancel_requested=self.cancel_requested,
-                    )
                 except Exception:
                     self.db.rollback()
                     failed_shot = self.db.get(Shot, shot.id)
-                    if (
-                        failed_shot is not None
-                        and failed_shot.status == ShotStatus.VIDEO_GENERATING.value
-                    ):
+                    if failed_shot is not None and failed_shot.status in {
+                        ShotStatus.VIDEO_GENERATING.value,
+                        ShotStatus.LIPSYNC_PENDING.value,
+                        ShotStatus.CONTINUITY_PENDING.value,
+                        ShotStatus.QA_PENDING.value,
+                    }:
                         self._transition(failed_shot, ShotStatus.FAILED)
                         self.db.commit()
                     raise
@@ -376,7 +438,7 @@ class MockPipeline:
                     shot_id=shot.id,
                     kind="actual_start_frame",
                     path=actual_start_path,
-                    parents=[video_asset.id],
+                    parents=[selected_video_asset.id],
                     generation_parameters=profile_provenance,
                 )
                 actual_end = register_asset(
@@ -385,7 +447,7 @@ class MockPipeline:
                     shot_id=shot.id,
                     kind="actual_end_frame",
                     path=actual_end_path,
-                    parents=[video_asset.id],
+                    parents=[selected_video_asset.id],
                     generation_parameters=profile_provenance,
                 )
                 for old_candidate in shot.candidates:
@@ -401,19 +463,12 @@ class MockPipeline:
                     settings={
                         **shot.generation_settings,
                         "render_profile_execution": execution_payload,
+                        "postprocessing": postprocessing,
                     },
                     generation_seconds=time.monotonic() - started,
                     gpu=self.gpu_assignment,
-                    input_asset_ids=[
-                        item
-                        for item in (
-                            shot.planned_start_frame_id,
-                            shot.continuity_source_frame_id,
-                            end_asset.id,
-                        )
-                        if item
-                    ],
-                    output_asset_id=video_asset.id,
+                    input_asset_ids=video_input_asset_ids,
+                    output_asset_id=selected_video_asset.id,
                     first_frame_asset_id=actual_start.id,
                     last_frame_asset_id=actual_end.id,
                     qa_results=qa,
@@ -424,19 +479,17 @@ class MockPipeline:
                 shot.actual_start_frame_id = actual_start.id
                 shot.actual_end_frame_id = actual_end.id
                 shot.selected_candidate_id = candidate.id
-                self._transition(shot, ShotStatus.VIDEO_READY)
-                self._transition(shot, ShotStatus.CONTINUITY_PENDING)
                 packet = build_packet(project, scene, shot)
                 packet["generation"]["render_profile_execution"] = execution_payload
+                packet["generation"]["postprocessing"] = postprocessing
                 shot.continuity_packet = packet
                 write_packet(shot_root / "continuity.yaml", packet)
-                self._transition(shot, ShotStatus.CONTINUITY_READY)
-                self._transition(shot, ShotStatus.QA_PENDING)
                 self._transition(
                     shot, ShotStatus.COMPLETE if qa["passed"] else ShotStatus.QA_FAILED
                 )
 
                 clips.append(output)
+                selected_clip_asset_ids.append(selected_video_asset.id)
                 transitions.append((shot.transition_type, shot.overlap_frame_count))
                 actual_ends.append(actual_end_path)
                 previous_shot = shot
@@ -508,13 +561,7 @@ class MockPipeline:
             provider="ffmpeg",
             model="transition-assembler-v1",
             generation_parameters=profile_provenance,
-            parents=[
-                candidate.output_asset_id
-                for scene in project.scenes
-                for shot in scene.shots
-                for candidate in shot.candidates
-                if candidate.id == shot.selected_candidate_id and candidate.output_asset_id
-            ],
+            parents=selected_clip_asset_ids,
             cancel_requested=self.cancel_requested,
         )
         render = Render(

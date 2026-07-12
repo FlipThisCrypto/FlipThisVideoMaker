@@ -185,6 +185,42 @@ async def test_resource_crud_uploads_and_candidate_review(db: Session, tmp_path:
         )
         assert shot_response.status_code == 201
         shot = shot_response.json()
+        second_shot = (
+            await client.post(
+                f"/api/v1/scenes/{scene['id']}/shots",
+                json={"sequence_number": 2, "duration": 3, "prompt": "Cutaway"},
+            )
+        ).json()
+        moved_shot = await client.post(
+            f"/api/v1/shots/{second_shot['id']}/move",
+            json={"direction": "up"},
+        )
+        assert moved_shot.status_code == 200
+        assert moved_shot.json()["sequence_number"] == 1
+        patched_shot = await client.patch(
+            f"/api/v1/shots/{shot['id']}",
+            json={
+                "narration": "A quiet cutaway",
+                "model": "mock-video-v2",
+                "generation_settings": {"candidate_count": 2},
+            },
+        )
+        assert patched_shot.json()["narration"] == "A quiet cutaway"
+        assert patched_shot.json()["model"] == "mock-video-v2"
+        assert patched_shot.json()["generation_settings"] == {"candidate_count": 2}
+
+        second_scene = (
+            await client.post(
+                f"/api/v1/projects/{project['id']}/scenes",
+                json={"number": 2, "title": "Second scene"},
+            )
+        ).json()
+        moved_scene = await client.post(
+            f"/api/v1/scenes/{second_scene['id']}/move",
+            json={"direction": "up"},
+        )
+        assert moved_scene.status_code == 200
+        assert moved_scene.json()["number"] == 1
         approved = await client.post(f"/api/v1/shots/{shot['id']}/approve")
         assert approved.json()["status"] == "approved"
 

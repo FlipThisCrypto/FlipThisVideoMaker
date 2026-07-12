@@ -2,9 +2,10 @@
 
 **Status date:** 2026-07-12  
 **Repository:** `FlipThisCrypto/FlipThisVideoMaker`
-**Truthful status:** the deterministic CPU mock vertical slice and its current cancellation,
-heartbeat, and GPU-admission reliability boundary are exercised and pass the documented validation
-matrix; live model production remains incomplete and unexercised.
+**Truthful status:** the deterministic CPU mock vertical slice, resumable post-processing stages,
+advanced media QA, browser workflow, cancellation, heartbeat, and GPU-admission reliability boundary
+are exercised. Live model production remains incomplete and unexercised. This file is the durable
+handoff point; resume from the final sections rather than relying on chat history.
 
 ## Exercised milestone
 
@@ -17,8 +18,9 @@ The local workflow now supports:
 5. Claim it from a CPU worker, generate immutable versioned assets, and persist a final-render Asset.
 6. View job completion and open the MP4 from the Renders page.
 7. Create/edit characters and mock voices, validate reference uploads, and preview mock speech.
-8. Edit scenes and the current core shot-control subset, inspect/rate/reject/select candidates, and
-   regenerate one shot without replacing its selected candidate.
+8. Create, edit, reorder, approve, and delete scenes and shots; inspect/rate/reject/select candidates;
+   and regenerate one shot without replacing its selected candidate.
+9. Upload a consent-acknowledged voice reference, preview mock speech, and delete voice profiles.
 
 The standalone smoke command creates a new Alembic-migrated SQLite database and unique project root.
 It renders four eight-second candidates and a 31.25-second final MP4 after a 0.25-second shared-frame
@@ -83,8 +85,16 @@ automatic fallback because its structured OOM and VRAM-release behavior has not 
 ### Exercised
 
 - Deterministic story planner.
-- Mock PNG image, tone TTS, and first/last-frame video providers.
-- FFmpeg media inspection, true last-frame extraction, transition assembly, and final validation.
+- Mock PNG image, tone TTS, first/last-frame video, lip-sync passthrough, and interpolation
+  passthrough providers.
+- Conditional lip-sync decisions skip narration, off-camera or mouth-hidden dialogue, explicit skips,
+  and video-provider-integrated lip-sync. Interpolation runs only when requested or when the shot uses
+  an interpolated bridge.
+- FFmpeg media inspection, true last-frame extraction, transition assembly, black/freeze/silence
+  detection, and final validation.
+- Standalone, tested FFmpeg finalization utilities cover soft subtitle muxing, subtitle burning,
+  two-pass EBU R128 loudness normalization, and optional looped/ducked music. These utilities are not
+  yet exposed through render jobs or the web render form.
 
 ### Implemented/configured, not exercised against real backends
 
@@ -97,8 +107,6 @@ automatic fallback because its structured OOM and VRAM-release behavior has not 
 - Generic administrator-configured CLI image, TTS, and video adapter code using argument arrays
   without a shell. Numeric OOM classification and cleanup fixtures pass; successful media-generation
   command fixtures remain missing.
-- Mock lip-sync and interpolation passthrough providers are implemented and discoverable but not
-  integrated into the exercised render pipeline.
 - YAML provider registry. Disabled adapters appear in discovery without being reported as healthy.
 
 ### Planned
@@ -124,13 +132,15 @@ exercised; discovery and worker startup are not claims of model execution.
 ## Frontend
 
 React/Vite/Tailwind/TanStack Query pages cover dashboard worker liveness, projects,
-story/scenes/shots, characters, voice profiles, reference uploads, candidates, render enqueueing, job
-progress/actions/logs, provider discovery, and render downloads. A real Chromium browser exercised
-create → character/voice → save → plan → enqueue → worker → completed render → individual-shot
-regeneration. Frontend lint, Vitest, TypeScript, and production build pass.
+story/scenes/shots, characters, voice profiles, image/audio reference uploads, candidates, render
+enqueueing, job progress/actions/logs, provider discovery, and render downloads. Scenes and shots have
+keyboard-friendly create/move/delete controls; shot editing includes narration, camera/model, and
+candidate-count settings. A maintained Playwright specification and isolated launcher exercise create
+→ character/voice → save → plan → enqueue → worker → completed render → individual-shot regeneration.
+Frontend lint, Vitest, TypeScript, production build, and that browser workflow pass.
 
-Still missing: drag reordering, provider/settings editing, audio reference controls in the UI, scene
-and shot creation buttons, richer render options, and a committed Playwright test specification.
+Still missing: drag-and-drop ordering (accessible move controls are present), administrator provider
+settings editing, manual shot start/end-frame replacement, and richer render/finalization options.
 
 ## Specification phase/gap map
 
@@ -138,9 +148,9 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 |---|---|---|
 | 1 — Foundation | API, React app, configuration, migrations, scripts, docs, and CPU tests run | Authentication remains local-only |
 | 2 — Domain/job engine | Persistent queue/retry, atomic terminal states, profile snapshots, typed same-lock OOM fallback, heartbeats, and GPU admission run | PostgreSQL claims, job leases, and configured concurrency |
-| 3 — Mock pipeline | Required four-shot MP4, continuity, subtitles, manifest, assets, and reruns run | Lip-sync/interpolation passthroughs are not pipeline-integrated |
-| 4 — UI | Core project/story/character/shot/candidate/job/render browser workflow run | Controls listed above and maintained Playwright spec |
-| 5 — Media/continuity | Frame extraction, hard/shared/crossfade assembly, thumbnail/contact sheet run | Advanced QA, mix/normalize, mux/burn, bridge variants |
+| 3 — Mock pipeline | Required four-shot MP4, continuity, subtitles, manifest, assets, reruns, conditional lip-sync, and requested interpolation run | Multiple-candidate generation in one render is not implemented |
+| 4 — UI | Maintained Playwright workflow plus project/story/character/voice/scene/shot/candidate/job/render controls run | Provider settings, manual keyframe replacement, and richer render controls |
+| 5 — Media/continuity | Frame extraction, hard/shared/crossfade assembly, thumbnail/contact sheet, black/freeze/silence QA, and standalone finalization utilities run | Wire normalize/music/subtitle mux-burn controls into render jobs; real interpolation bridges |
 | 6 — Live backends | Planner protocol tests and adapter/config boundaries exist | Complete protocol fixtures and real ComfyUI/WanGP/Ollama exercise |
 | 7 — Linux operations | API and CPU/GPU worker process lifecycle run; scripts/systemd templates exist | Real CUDA/model workload and long-run operations evidence |
 | 8 — Validation | Matrix below passes locally; GitHub Actions run `29207968290` passed | Real backend and CUDA workload evidence |
@@ -155,7 +165,7 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 | `uv run ruff check .` | Passed |
 | `uv run ruff format --check .` | Passed |
 | `uv run mypy src` | Passed in strict mode |
-| `uv run pytest` | 78 passed |
+| `uv run pytest` | 95 passed |
 | `uv run flipthis-smoke` | Passed with isolated Alembic database |
 | Final `ffprobe` | 31.25 s, H.264 854×480/24 fps, AAC 48 kHz stereo |
 | API real-process health | HTTP 200; clean SIGINT shutdown |
@@ -167,7 +177,7 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 | `pnpm lint` | Passed with no warnings |
 | `pnpm test` | 9 passed |
 | `pnpm build` | Passed |
-| Chromium core workflow | Passed through character/voice, render, and isolated regeneration |
+| `pnpm e2e` | Passed in Chromium through character/voice, render, and isolated regeneration |
 | Public exposure sweep | No credentials, private assets, generated media, or user-owned skills staged |
 | User-owned skills preservation | `skills.7z` SHA-256 unchanged; nested working content/status preserved |
 
@@ -179,8 +189,8 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 3. Configured `max_concurrent_jobs` is reported but not enforced; each current worker loop is serial.
 4. A stale heartbeat is deliberately not a job lease. Automatic orphan reconciliation/requeueing is
    absent because it could duplicate an external generation process.
-5. Advanced QA (black/freeze/silence detection), audio normalization/mixing, subtitle mux/burn, and
-   transition variants beyond the exercised set remain absent.
+5. Audio normalization/mixing and subtitle mux/burn are tested as standalone utilities but are not
+   wired into render-job/API/UI options. Transition variants beyond the exercised set remain absent.
 6. Authentication is not implemented. The default localhost bind must not be exposed publicly as-is.
 7. No real model backend or GPU workload has been run, so model VRAM behavior and provider protocols
    remain unverified.
@@ -190,11 +200,12 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 
 ## Next execution order
 
-1. Integrate mock lip-sync/interpolation decisions, add audio mixing/normalization, expanded black /
-   freeze / silence QA, and subtitle mux/burn options.
-2. Add a maintained Playwright test file to CI and finish scene/shot creation, drag ordering, audio
-   reference, provider/settings, and richer render controls.
-3. Add complete successful-command fixtures for generic CLI media providers and complete protocol
+1. Wire the tested finalization utilities into immutable render stages and expose subtitle mode,
+   loudness normalization, and optional music/ducking through versioned render-job inputs and the UI.
+2. Implement audio-measured speaking-shot duration, multi-candidate render generation, and manual
+   planned start/end-frame upload or replacement without rebuilding completed work.
+3. Finish administrator provider/settings controls and successful-command fixtures for generic CLI
+   media providers; add complete protocol
    fixtures for ComfyUI and WanGP.
 4. Exercise ComfyUI, WanGP, and Ollama against locally installed backends before enabling them.
 5. Run one real workload on each RTX 4070 independently and record VRAM/health evidence.

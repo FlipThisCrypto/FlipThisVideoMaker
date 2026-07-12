@@ -11,9 +11,12 @@ from flipthis_video_maker.config.render_profiles import (
     load_render_profile_configuration,
 )
 from flipthis_video_maker.config.settings import get_settings
+from flipthis_video_maker.domain.enums import ShotStatus
 from flipthis_video_maker.domain.models import Asset, Candidate, Project, Scene, Shot
+from flipthis_video_maker.domain.state_machine import validate_transition
 from flipthis_video_maker.media.ffmpeg import extract_frame
 from flipthis_video_maker.pipeline.mock_pipeline import PipelineCancelled
+from flipthis_video_maker.pipeline.postprocessing import apply_mock_postprocessing
 from flipthis_video_maker.pipeline.provider_execution import (
     CleanupCallback,
     FallbackCallback,
@@ -26,6 +29,8 @@ from flipthis_video_maker.providers.base.errors import (
 from flipthis_video_maker.providers.base.models import ImageRequest, TTSRequest, VideoRequest
 from flipthis_video_maker.providers.mock.providers import (
     MockImageProvider,
+    MockInterpolationProvider,
+    MockLipSyncProvider,
     MockTTSProvider,
     MockVideoProvider,
 )
@@ -58,6 +63,8 @@ class MockShotRegenerator:
         self.images = MockImageProvider()
         self.tts = MockTTSProvider()
         self.video = MockVideoProvider(cancel_requested)
+        self.lip_sync = MockLipSyncProvider(cancel_requested)
+        self.interpolation = MockInterpolationProvider(cancel_requested)
 
     async def run(
         self,
@@ -109,9 +116,11 @@ class MockShotRegenerator:
         candidate_negative = (
             negative_prompt if negative_prompt is not None else shot.negative_prompt
         )
-        candidate_settings = (
-            generation_settings if generation_settings is not None else shot.generation_settings
-        )
+        candidate_settings = {
+            **shot.generation_settings,
+            **(generation_settings or {}),
+        }
+        original_status = ShotStatus(shot.status)
 
         start_asset = self._conditioning_start(shot)
         if start_asset is None:
@@ -198,6 +207,7 @@ class MockShotRegenerator:
         )
 
         audio_path: Path | None = None
+        audio_asset: Asset | None = None
         input_assets = [start_asset.id, end_asset.id]
         if shot.dialogue:
             audio_path = root / "audio" / f"dialogue-{candidate_seed}.wav"
@@ -223,6 +233,7 @@ class MockShotRegenerator:
 
         self._check_cancelled()
         self._report_progress(0.45, "generating shot candidate")
+        track_state = self._begin_regeneration_state(shot)
         # Persist prepared inputs and release SQLite's writer lock before provider execution.
         self.db.commit()
         output = root / "candidates" / f"candidate-{candidate_seed}.mp4"
@@ -246,11 +257,15 @@ class MockShotRegenerator:
                 )
             )
 
-        output, execution = await self._execute_provider(
-            self.video,
-            generate_video,
-            execution,
-        )
+        try:
+            output, execution = await self._execute_provider(
+                self.video,
+                generate_video,
+                execution,
+            )
+        except Exception:
+            self._mark_regeneration_failed(shot, track_state)
+            raise
         profile = execution.profile
         profile_parameters = execution.generation_parameters()
         execution_payload = execution.model_dump(mode="json")
@@ -259,6 +274,69 @@ class MockShotRegenerator:
             "requested_render_profile": execution.requested_profile,
             "render_profile_execution": execution_payload,
         }
+        self._check_cancelled()
+        try:
+            base_quality = analyze_video(
+                output,
+                shot.duration,
+                profile.width,
+                profile.height,
+                profile.fps,
+                audio_expected=True,
+                cancel_requested=self.cancel_requested,
+                audible_audio_expected=bool(shot.dialogue),
+            )
+            video_asset = register_asset(
+                self.db,
+                project_id=project.id,
+                shot_id=shot.id,
+                kind="video_candidate",
+                path=output,
+                provider="mock-video",
+                model="ffmpeg-xfade-v1",
+                prompt=candidate_prompt,
+                seed=candidate_seed,
+                parents=input_assets,
+                generation_parameters=profile_provenance,
+                cancel_requested=self.cancel_requested,
+            )
+            if track_state:
+                self._transition(shot, ShotStatus.VIDEO_READY)
+            self.db.commit()
+            postprocess = await apply_mock_postprocessing(
+                self.db,
+                project_id=project.id,
+                shot=shot,
+                video_path=output,
+                video_asset=video_asset,
+                audio_path=audio_path,
+                audio_asset=audio_asset,
+                output_directory=root / "postprocessing",
+                settings=candidate_settings,
+                expected_duration=shot.duration,
+                width=profile.width,
+                height=profile.height,
+                fps=profile.fps,
+                prompt=candidate_prompt,
+                seed=candidate_seed,
+                profile_provenance=profile_provenance,
+                base_quality=base_quality,
+                audible_audio_expected=bool(shot.dialogue),
+                lip_sync=self.lip_sync,
+                interpolation=self.interpolation,
+                transition=(lambda target: self._transition(shot, target)) if track_state else None,
+                cancel_requested=self.cancel_requested,
+            )
+        except Exception:
+            self._mark_regeneration_failed(shot, track_state)
+            raise
+        output = postprocess.output_path
+        selected_video_asset = postprocess.output_asset
+        qa = postprocess.quality
+        postprocessing = postprocess.metadata
+        if track_state:
+            self._transition(shot, ShotStatus.QA_PENDING)
+            self.db.commit()
         self._check_cancelled()
         self._report_progress(0.75, "extracting candidate frames")
         actual_start_path = root / "frames" / f"actual-start-{candidate_seed}.png"
@@ -270,36 +348,13 @@ class MockShotRegenerator:
             last=True,
             cancel_requested=self.cancel_requested,
         )
-        qa = analyze_video(
-            output,
-            shot.duration,
-            profile.width,
-            profile.height,
-            profile.fps,
-            audio_expected=True,
-            cancel_requested=self.cancel_requested,
-        )
-        video_asset = register_asset(
-            self.db,
-            project_id=project.id,
-            shot_id=shot.id,
-            kind="video_candidate",
-            path=output,
-            provider="mock-video",
-            model="ffmpeg-xfade-v1",
-            prompt=candidate_prompt,
-            seed=candidate_seed,
-            parents=input_assets,
-            generation_parameters=profile_provenance,
-            cancel_requested=self.cancel_requested,
-        )
         actual_start = register_asset(
             self.db,
             project_id=project.id,
             shot_id=shot.id,
             kind="actual_start_frame",
             path=actual_start_path,
-            parents=[video_asset.id],
+            parents=[selected_video_asset.id],
             generation_parameters=profile_provenance,
         )
         actual_end = register_asset(
@@ -308,7 +363,7 @@ class MockShotRegenerator:
             shot_id=shot.id,
             kind="actual_end_frame",
             path=actual_end_path,
-            parents=[video_asset.id],
+            parents=[selected_video_asset.id],
             generation_parameters=profile_provenance,
         )
         candidate = Candidate(
@@ -321,11 +376,12 @@ class MockShotRegenerator:
             settings={
                 **candidate_settings,
                 "render_profile_execution": execution_payload,
+                "postprocessing": postprocessing,
             },
             generation_seconds=time.monotonic() - started,
             gpu=self.gpu_assignment,
             input_asset_ids=input_assets,
-            output_asset_id=video_asset.id,
+            output_asset_id=selected_video_asset.id,
             first_frame_asset_id=actual_start.id,
             last_frame_asset_id=actual_end.id,
             qa_results=qa,
@@ -333,6 +389,15 @@ class MockShotRegenerator:
         )
         shot.retry_count += 1
         self.db.add(candidate)
+        if track_state:
+            terminal = (
+                original_status
+                if original_status in {ShotStatus.COMPLETE, ShotStatus.QA_FAILED}
+                else ShotStatus.COMPLETE
+                if qa["passed"]
+                else ShotStatus.QA_FAILED
+            )
+            self._transition(shot, terminal)
         self._check_cancelled()
         self.db.commit()
         self._report_progress(0.98, "validated shot candidate")
@@ -350,6 +415,33 @@ class MockShotRegenerator:
                     return asset
         return None
 
+    def _begin_regeneration_state(self, shot: Shot) -> bool:
+        status = ShotStatus(shot.status)
+        if status in {ShotStatus.COMPLETE, ShotStatus.QA_FAILED, ShotStatus.FAILED}:
+            self._transition(shot, ShotStatus.VIDEO_PENDING)
+        elif status is ShotStatus.KEYFRAMES_READY:
+            self._transition(shot, ShotStatus.VIDEO_PENDING)
+        elif status is not ShotStatus.VIDEO_PENDING:
+            return False
+        self._transition(shot, ShotStatus.VIDEO_GENERATING)
+        return True
+
+    def _mark_regeneration_failed(self, shot: Shot, track_state: bool) -> None:
+        self.db.rollback()
+        if not track_state:
+            return
+        failed_shot = self.db.get(Shot, shot.id)
+        if failed_shot is None:
+            return
+        if failed_shot.status in {
+            ShotStatus.VIDEO_GENERATING.value,
+            ShotStatus.LIPSYNC_PENDING.value,
+            ShotStatus.CONTINUITY_PENDING.value,
+            ShotStatus.QA_PENDING.value,
+        }:
+            self._transition(failed_shot, ShotStatus.FAILED)
+            self.db.commit()
+
     def _check_cancelled(self) -> None:
         if self.cancel_requested and self.cancel_requested():
             raise PipelineCancelled("Shot regeneration cancellation requested")
@@ -357,6 +449,11 @@ class MockShotRegenerator:
     def _report_progress(self, value: float, stage: str) -> None:
         if self.progress:
             self.progress(value, stage)
+
+    @staticmethod
+    def _transition(shot: Shot, target: ShotStatus) -> None:
+        validate_transition(ShotStatus(shot.status), target)
+        shot.status = target.value
 
     async def _execute_provider[ResultT](
         self,

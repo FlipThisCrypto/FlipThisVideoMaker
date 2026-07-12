@@ -31,6 +31,14 @@ class VideoProvider(Provider, Protocol):
     async def generate(self, request: VideoRequest) -> Path: ...
 
 
+class LipSyncProvider(Provider, Protocol):
+    async def process(self, video: Path, audio: Path, output: Path) -> Path: ...
+
+
+class InterpolationProvider(Provider, Protocol):
+    async def process(self, video: Path, output: Path) -> Path: ...
+
+
 class StoryPlanner(Provider, Protocol):
     async def plan(self, story: str) -> StoryPlan: ...
 
@@ -44,6 +52,8 @@ class OOMRecoverableProvider(Protocol):
 
 __all__ = [
     "ImageProvider",
+    "InterpolationProvider",
+    "LipSyncProvider",
     "OOMRecoverableProvider",
     "Provider",
     "StoryPlanner",

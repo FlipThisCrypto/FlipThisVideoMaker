@@ -26,3 +26,5 @@ jobs:
       - run: uv run flipthis-smoke
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir web lint && pnpm --dir web test && pnpm --dir web build
+      - run: pnpm --dir web exec playwright install --with-deps chromium
+      - run: pnpm e2e

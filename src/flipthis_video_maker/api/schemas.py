@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AliasPath, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -181,9 +181,12 @@ class ShotCreate(BaseModel):
 
 
 class ShotPatch(BaseModel):
+    sequence_number: int | None = Field(default=None, ge=1)
+    shot_type: str | None = None
     prompt: str | None = None
     negative_prompt: str | None = None
     dialogue: str | None = None
+    narration: str | None = None
     speaker: str | None = None
     duration: float | None = Field(default=None, gt=0, le=60)
     provider: str | None = None
@@ -192,6 +195,13 @@ class ShotPatch(BaseModel):
     transition_type: str | None = None
     overlap_frame_count: int | None = Field(default=None, ge=0, le=240)
     camera: dict[str, Any] | None = None
+    character_positions: dict[str, Any] | None = None
+    character_actions: dict[str, Any] | None = None
+    generation_settings: dict[str, Any] | None = None
+
+
+class MoveRequest(BaseModel):
+    direction: Literal["up", "down"]
 
 
 class ShotRead(ORMModel):
@@ -203,8 +213,11 @@ class ShotRead(ORMModel):
     prompt: str
     negative_prompt: str
     dialogue: str
+    narration: str
     speaker: str | None
     camera: dict[str, Any]
+    character_positions: dict[str, Any]
+    character_actions: dict[str, Any]
     status: str
     provider: str
     model: str

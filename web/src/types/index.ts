@@ -60,8 +60,11 @@ export interface Shot {
   prompt: string;
   negative_prompt: string;
   dialogue: string;
+  narration: string;
   speaker: string | null;
   camera: Record<string, string>;
+  character_positions: Record<string, unknown>;
+  character_actions: Record<string, unknown>;
   status: string;
   provider: string;
   model: string;
@@ -76,6 +79,9 @@ export interface Shot {
   continuity_target_frame_id: string | null;
   selected_candidate_id: string | null;
   continuity_packet: Record<string, unknown>;
+  generation_settings: Record<string, unknown>;
+  approval_state: string;
+  retry_count: number;
 }
 export interface Job {
   id: string;
