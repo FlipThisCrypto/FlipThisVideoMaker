@@ -1,0 +1,14 @@
+[Unit]
+Description=FlipThisVideoMaker API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/FlipThisVideoMaker
+EnvironmentFile=-/opt/FlipThisVideoMaker/.env
+ExecStart=/usr/bin/env uv run flipthis-api
+Restart=on-failure
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

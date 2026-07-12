@@ -1,0 +1,52 @@
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# JavaScript dependencies and build output
+node_modules/
+web/dist/
+*.tsbuildinfo
+.playwright-cli/
+output/playwright/
+coverage/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Application state and generated media
+data/
+run/
+projects/
+models/
+.cache/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.wav
+*.mp3
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# User-owned local skills archive/repository are intentionally preserved in place.
+# They remain visible so their ownership is explicit; do not add them to root commits.
+skills/
+skills.7z

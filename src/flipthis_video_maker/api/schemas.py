@@ -1,0 +1,279 @@
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ORMModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    target_duration: float = Field(default=30, gt=0, le=3600)
+    aspect_ratio: str = "16:9"
+    resolution_profile: str = "draft"
+    fps: float = Field(default=24, ge=1, le=120)
+    global_visual_style: str = ""
+    global_negative_prompt: str = ""
+
+
+class ProjectRead(ProjectCreate, ORMModel):
+    id: str
+    status: str
+    root_asset_directory: str
+    original_story: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class CharacterCreate(BaseModel):
+    name: str
+    description: str = ""
+    canonical_appearance: str = ""
+    personality_notes: str = ""
+    wardrobe_rules: str = ""
+    color_palette: list[str] = Field(default_factory=list)
+    consent_provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class CharacterRead(CharacterCreate, ORMModel):
+    id: str
+    project_id: str
+    reference_images: list[str]
+    expression_references: list[str]
+    pose_references: list[str]
+    negative_identity_traits: str
+    model_references: dict[str, Any]
+    default_voice_profile_id: str | None
+
+
+class CharacterPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = None
+    canonical_appearance: str | None = None
+    personality_notes: str | None = None
+    wardrobe_rules: str | None = None
+    color_palette: list[str] | None = None
+    negative_identity_traits: str | None = None
+    model_references: dict[str, Any] | None = None
+    consent_provenance: dict[str, Any] | None = None
+    default_voice_profile_id: str | None = None
+
+
+class VoiceProfileCreate(BaseModel):
+    provider: str = "mock"
+    model: str = "mock-tone-v1"
+    reference_audio: str | None = None
+    language: str = "en"
+    speaking_style: str = "neutral"
+    speed: float = Field(default=1, gt=0, le=4)
+    pitch: float = Field(default=0, ge=-24, le=24)
+    emotion_defaults: dict[str, Any] = Field(default_factory=dict)
+    consent_acknowledged: bool = False
+
+
+class VoiceProfilePatch(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+    reference_audio: str | None = None
+    language: str | None = None
+    speaking_style: str | None = None
+    speed: float | None = Field(default=None, gt=0, le=4)
+    pitch: float | None = Field(default=None, ge=-24, le=24)
+    emotion_defaults: dict[str, Any] | None = None
+    consent_acknowledged: bool | None = None
+
+
+class VoiceProfileRead(VoiceProfileCreate, ORMModel):
+    id: str
+    character_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SceneCreate(BaseModel):
+    number: int = Field(ge=1)
+    title: str = ""
+    location: str = ""
+    time_of_day: str = ""
+    lighting: str = ""
+    characters: list[str] = Field(default_factory=list)
+    props: list[str] = Field(default_factory=list)
+    environment: str = ""
+    continuity_state: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScenePatch(BaseModel):
+    number: int | None = Field(default=None, ge=1)
+    title: str | None = None
+    location: str | None = None
+    time_of_day: str | None = None
+    lighting: str | None = None
+    characters: list[str] | None = None
+    props: list[str] | None = None
+    environment: str | None = None
+    continuity_state: dict[str, Any] | None = None
+
+
+class SceneRead(SceneCreate, ORMModel):
+    id: str
+    project_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ShotCreate(BaseModel):
+    sequence_number: int = Field(ge=1)
+    shot_type: str = "medium"
+    duration: float = Field(default=3, gt=0, le=60)
+    prompt: str = ""
+    negative_prompt: str = ""
+    dialogue: str = ""
+    narration: str = ""
+    speaker: str | None = None
+    camera: dict[str, Any] = Field(default_factory=dict)
+    character_positions: dict[str, Any] = Field(default_factory=dict)
+    character_actions: dict[str, Any] = Field(default_factory=dict)
+    transition_type: str = "hard_cut"
+    overlap_frame_count: int = Field(default=0, ge=0, le=240)
+    seed: int = 42
+    provider: str = "mock"
+    model: str = "mock-video-v1"
+    generation_settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class ShotPatch(BaseModel):
+    prompt: str | None = None
+    negative_prompt: str | None = None
+    dialogue: str | None = None
+    speaker: str | None = None
+    duration: float | None = Field(default=None, gt=0, le=60)
+    provider: str | None = None
+    model: str | None = None
+    seed: int | None = None
+    transition_type: str | None = None
+    overlap_frame_count: int | None = Field(default=None, ge=0, le=240)
+    camera: dict[str, Any] | None = None
+
+
+class ShotRead(ORMModel):
+    id: str
+    scene_id: str
+    sequence_number: int
+    shot_type: str
+    duration: float
+    prompt: str
+    negative_prompt: str
+    dialogue: str
+    speaker: str | None
+    camera: dict[str, Any]
+    status: str
+    provider: str
+    model: str
+    seed: int
+    transition_type: str
+    overlap_frame_count: int
+    planned_start_frame_id: str | None
+    planned_end_frame_id: str | None
+    actual_start_frame_id: str | None
+    actual_end_frame_id: str | None
+    continuity_source_frame_id: str | None
+    continuity_target_frame_id: str | None
+    selected_candidate_id: str | None
+    continuity_packet: dict[str, Any]
+    approval_state: str
+    retry_count: int
+    generation_settings: dict[str, Any]
+
+
+class AssetRead(ORMModel):
+    id: str
+    project_id: str
+    shot_id: str | None
+    type: str
+    file_path: str
+    mime_type: str
+    checksum: str
+    width: int | None
+    height: int | None
+    duration: float | None
+    frame_rate: float | None
+    source_provider: str
+    model_identifier: str
+    prompt: str
+    seed: int | None
+    generation_parameters: dict[str, Any]
+    parent_asset_ids: list[str]
+    created_at: datetime
+
+
+class CandidateRead(ORMModel):
+    id: str
+    shot_id: str
+    provider: str
+    model: str
+    prompt: str
+    negative_prompt: str
+    seed: int
+    settings: dict[str, Any]
+    generation_seconds: float
+    gpu: str
+    input_asset_ids: list[str]
+    output_asset_id: str | None
+    first_frame_asset_id: str | None
+    last_frame_asset_id: str | None
+    qa_results: dict[str, Any]
+    user_rating: int | None
+    disposition: str
+    created_at: datetime
+
+
+class CandidateRating(BaseModel):
+    rating: int = Field(ge=1, le=5)
+
+
+class ShotRegenerateRequest(BaseModel):
+    same_seed: bool = True
+    prompt: str | None = None
+    negative_prompt: str | None = None
+    generation_settings: dict[str, Any] | None = None
+
+
+class JobRead(ORMModel):
+    id: str
+    job_type: str
+    project_id: str
+    shot_id: str | None
+    provider: str
+    gpu_assignment: str
+    state: str
+    progress: float
+    current_stage: str
+    attempt_number: int
+    error_info: dict[str, Any]
+    log_path: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class RenderRead(ORMModel):
+    id: str
+    project_id: str
+    render_profile: str
+    output_path: str
+    codec: str
+    resolution: str
+    frame_rate: float
+    audio_configuration: dict[str, Any]
+    subtitle_configuration: dict[str, Any]
+    creation_metadata: dict[str, Any]
+    created_at: datetime
+
+
+class ErrorResponse(BaseModel):
+    error: str
+    detail: str
+    request_id: str | None = None

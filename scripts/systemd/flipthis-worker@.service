@@ -1,0 +1,14 @@
+[Unit]
+Description=FlipThisVideoMaker worker %i
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/FlipThisVideoMaker
+EnvironmentFile=-/opt/FlipThisVideoMaker/.env
+ExecStart=/usr/bin/env uv run flipthis-worker --device %i
+Restart=on-failure
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=FlipThisVideoMaker development web UI
+After=network.target flipthis-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/FlipThisVideoMaker
+ExecStart=/usr/bin/env corepack pnpm --dir web dev --host 127.0.0.1
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

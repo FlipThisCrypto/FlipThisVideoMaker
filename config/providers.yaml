@@ -1,0 +1,32 @@
+version: 1
+providers:
+  - id: mock-image
+    kind: mock
+    enabled: true
+  - id: mock-tts
+    kind: mock
+    enabled: true
+  - id: mock-video
+    kind: mock
+    enabled: true
+  - id: comfyui-local
+    kind: comfyui
+    enabled: false
+    endpoint: http://127.0.0.1:8188
+    workflow_template_directory: ./config/comfyui-workflows
+  - id: wangp-local
+    kind: wangp
+    enabled: false
+    python: /opt/wangp/.venv/bin/python
+    script: /opt/wangp/wgp.py
+  - id: ollama-local
+    kind: ollama
+    enabled: false
+    endpoint: http://127.0.0.1:11434
+    model: qwen3:8b
+  - id: openai-compatible-local
+    kind: openai_compatible
+    enabled: false
+    endpoint: http://127.0.0.1:8001
+    model: local-model
+    api_key_env: FTVM_LOCAL_LLM_API_KEY

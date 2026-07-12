@@ -1,0 +1,55 @@
+[project]
+name = "flipthis-video-maker"
+version = "0.1.0"
+description = "Local-first, provider-neutral AI video production studio"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.13,<2",
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "pillow>=10.4,<12",
+  "pydantic-settings>=2.5,<3",
+  "python-multipart>=0.0.12,<1",
+  "pyyaml>=6.0,<7",
+  "sqlalchemy>=2.0,<3",
+  "structlog>=24.4,<26",
+  "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.11,<2",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "ruff>=0.7,<1",
+  "types-pyyaml>=6.0,<7",
+]
+
+[project.scripts]
+flipthis-api = "flipthis_video_maker.main:run"
+flipthis-worker = "flipthis_video_maker.workers.main:run"
+flipthis-smoke = "flipthis_video_maker.smoke:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flipthis_video_maker"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]

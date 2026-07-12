@@ -1,0 +1,6 @@
+{
+  "name": "flipthis-video-maker",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {"dev": "pnpm --dir web dev", "build": "pnpm --dir web build", "test": "pnpm --dir web test", "lint": "pnpm --dir web lint"}
+}

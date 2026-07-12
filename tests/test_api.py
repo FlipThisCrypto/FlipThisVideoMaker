@@ -1,0 +1,165 @@
+from collections.abc import Generator
+from io import BytesIO
+from pathlib import Path
+
+import httpx
+import pytest
+from PIL import Image
+from sqlalchemy.orm import Session
+
+from flipthis_video_maker.config.settings import Settings, get_settings
+from flipthis_video_maker.database.session import get_db
+from flipthis_video_maker.domain.enums import JobState
+from flipthis_video_maker.domain.models import Candidate, Job
+from flipthis_video_maker.main import create_app
+
+
+@pytest.mark.asyncio
+async def test_api_starts_on_migrated_schema_and_persists_project(
+    db: Session, tmp_path: Path
+) -> None:
+    app = create_app()
+
+    def database_override() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = database_override
+    app.dependency_overrides[get_settings] = lambda: Settings(data_dir=tmp_path / "projects")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        health = await client.get("/api/v1/health")
+        assert health.status_code == 200
+        response = await client.post(
+            "/api/v1/projects",
+            json={
+                "name": "API integration",
+                "description": "",
+                "target_duration": 30,
+                "aspect_ratio": "16:9",
+                "resolution_profile": "draft",
+                "fps": 24,
+                "global_visual_style": "",
+                "global_negative_prompt": "",
+            },
+        )
+        assert response.status_code == 201
+        project_id = response.json()["id"]
+        persisted = await client.get(f"/api/v1/projects/{project_id}")
+        assert persisted.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_resource_crud_uploads_and_candidate_review(db: Session, tmp_path: Path) -> None:
+    app = create_app()
+
+    def database_override() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = database_override
+    app.dependency_overrides[get_settings] = lambda: Settings(data_dir=tmp_path / "projects")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        project = (
+            await client.post(
+                "/api/v1/projects",
+                json={"name": "Resource integration", "target_duration": 30},
+            )
+        ).json()
+        character_response = await client.post(
+            f"/api/v1/projects/{project['id']}/characters",
+            json={"name": "Ash", "consent_provenance": {"kind": "fictional"}},
+        )
+        assert character_response.status_code == 201
+        character = character_response.json()
+        voice_response = await client.post(
+            f"/api/v1/characters/{character['id']}/voice-profiles",
+            json={"provider": "mock", "consent_acknowledged": True},
+        )
+        assert voice_response.status_code == 201
+        voice = voice_response.json()
+        patched = await client.patch(
+            f"/api/v1/characters/{character['id']}",
+            json={
+                "wardrobe_rules": "black hoodie",
+                "default_voice_profile_id": voice["id"],
+            },
+        )
+        assert patched.json()["default_voice_profile_id"] == voice["id"]
+
+        image_bytes = BytesIO()
+        Image.new("RGB", (64, 48), "navy").save(image_bytes, "PNG")
+        reference = await client.post(
+            f"/api/v1/characters/{character['id']}/references",
+            files={"file": ("reference.png", image_bytes.getvalue(), "image/png")},
+        )
+        assert reference.status_code == 201
+        assert (reference.json()["width"], reference.json()["height"]) == (64, 48)
+        invalid = await client.post(
+            f"/api/v1/characters/{character['id']}/references",
+            files={"file": ("fake.png", b"not an image", "image/png")},
+        )
+        assert invalid.status_code == 400
+        assert invalid.json()["error"] == "request_error"
+
+        preview = await client.post(
+            f"/api/v1/voice-profiles/{voice['id']}/preview",
+            params={"text": "Preview line"},
+        )
+        assert preview.status_code == 200
+        preview_file = await client.get(f"/api/v1/assets/{preview.json()['id']}/file")
+        assert preview_file.status_code == 200
+        assert preview_file.headers["content-type"].startswith("audio/wav")
+
+        scene_response = await client.post(
+            f"/api/v1/projects/{project['id']}/scenes",
+            json={"number": 1, "title": "Manual scene"},
+        )
+        assert scene_response.status_code == 201
+        scene = scene_response.json()
+        shot_response = await client.post(
+            f"/api/v1/scenes/{scene['id']}/shots",
+            json={"sequence_number": 1, "duration": 4, "prompt": "Manual shot"},
+        )
+        assert shot_response.status_code == 201
+        shot = shot_response.json()
+        approved = await client.post(f"/api/v1/shots/{shot['id']}/approve")
+        assert approved.json()["status"] == "approved"
+
+        candidate = Candidate(
+            shot_id=shot["id"],
+            provider="mock-video",
+            model="test-model",
+            prompt="Manual shot",
+            seed=42,
+        )
+        db.add(candidate)
+        db.commit()
+        selected = await client.post(f"/api/v1/shots/{shot['id']}/candidates/{candidate.id}/select")
+        assert selected.status_code == 200
+        rated = await client.post(f"/api/v1/candidates/{candidate.id}/rating", json={"rating": 5})
+        assert rated.json()["user_rating"] == 5
+        rejected = await client.post(f"/api/v1/candidates/{candidate.id}/reject")
+        assert rejected.json()["disposition"] == "rejected"
+
+        assets = await client.get(f"/api/v1/projects/{project['id']}/assets")
+        assert len(assets.json()) == 2
+
+        log_path = tmp_path / "job.jsonl"
+        log_path.write_text('{"event":"job_succeeded"}\n', encoding="utf-8")
+        job = Job(
+            job_type="mock_project_render",
+            project_id=project["id"],
+            state=JobState.SUCCEEDED.value,
+            progress=1,
+            current_stage="complete",
+            log_path=str(log_path),
+        )
+        db.add(job)
+        db.commit()
+        events = await client.get(f"/api/v1/jobs/{job.id}/events")
+        assert events.status_code == 200
+        assert "event: job" in events.text
+        assert '"state":"succeeded"' in events.text
+        log = await client.get(f"/api/v1/jobs/{job.id}/log")
+        assert log.status_code == 200
+        assert "job_succeeded" in log.text
