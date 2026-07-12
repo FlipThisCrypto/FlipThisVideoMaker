@@ -21,6 +21,7 @@ def register_asset(
     prompt: str = "",
     seed: int | None = None,
     parents: list[str] | None = None,
+    generation_parameters: dict[str, Any] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
 ) -> Asset:
     info = (
@@ -61,6 +62,7 @@ def register_asset(
         model_identifier=model,
         prompt=prompt,
         seed=seed,
+        generation_parameters=generation_parameters or {},
         parent_asset_ids=parents or [],
     )
     db.add(asset)

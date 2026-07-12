@@ -6,15 +6,18 @@ profiles:
     fps: 24
     video_codec: libx264
     audio_codec: aac
+    fallback_profile: null
   standard:
     width: 1280
     height: 720
     fps: 24
     video_codec: libx264
     audio_codec: aac
+    fallback_profile: draft
   final:
     width: 1920
     height: 1080
     fps: 24
     video_codec: libx264
     audio_codec: aac
+    fallback_profile: standard

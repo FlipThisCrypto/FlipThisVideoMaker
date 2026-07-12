@@ -124,6 +124,12 @@ class MockVideoProvider:
         )
         ffmpeg = get_settings().ffmpeg_path
         frames = max(2, round(request.duration * request.fps))
+        video_codec = request.settings.get("video_codec", "libx264")
+        audio_codec = request.settings.get("audio_codec", "aac")
+        if not isinstance(video_codec, str) or not video_codec:
+            raise ValueError("Mock video codec must be a non-empty string")
+        if not isinstance(audio_codec, str) or not audio_codec:
+            raise ValueError("Mock audio codec must be a non-empty string")
         vf = (
             f"[0:v]scale={request.width}:{request.height},format=yuv420p[a];"
             f"[1:v]scale={request.width}:{request.height},format=yuv420p[b];"
@@ -160,13 +166,13 @@ class MockVideoProvider:
             "-frames:v",
             str(frames),
             "-c:v",
-            "libx264",
+            video_codec,
             "-pix_fmt",
             "yuv420p",
             "-movflags",
             "+faststart",
             "-c:a",
-            "aac",
+            audio_codec,
             "-ar",
             "48000",
             "-ac",

@@ -5,6 +5,11 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from flipthis_video_maker.config.render_profiles import (
+    RenderProfileConfigurationFile,
+    load_render_profile_configuration,
+)
+from flipthis_video_maker.config.settings import get_settings
 from flipthis_video_maker.continuity.packet import build_packet, write_packet
 from flipthis_video_maker.domain.enums import ProjectStatus, ShotStatus
 from flipthis_video_maker.domain.models import (
@@ -45,18 +50,25 @@ class MockPipeline:
         db: Session,
         cancel_requested: Callable[[], bool] | None = None,
         progress: Callable[[float, str], None] | None = None,
+        render_profiles: RenderProfileConfigurationFile | None = None,
     ) -> None:
         self.db = db
         self.cancel_requested = cancel_requested
         self.progress = progress
+        self.render_profiles = render_profiles or load_render_profile_configuration(
+            get_settings().render_profile_config
+        )
         self.images = MockImageProvider()
         self.tts = MockTTSProvider()
         self.video = MockVideoProvider(cancel_requested)
 
-    async def run(self, project_id: str) -> Render:
+    async def run(self, project_id: str, *, render_profile_name: str | None = None) -> Render:
         project = self.db.get(Project, project_id)
         if project is None:
             raise ValueError(f"Unknown project {project_id}")
+        profile_name = render_profile_name or project.resolution_profile
+        profile = self.render_profiles.require(profile_name)
+        profile_parameters = profile.generation_parameters(profile_name)
 
         root = Path(project.root_asset_directory)
         run_id = uuid.uuid4().hex
@@ -96,6 +108,8 @@ class MockPipeline:
                         ImageRequest(
                             prompt=f"{shot.prompt} opening",
                             output_path=planned_start_path,
+                            width=profile.width,
+                            height=profile.height,
                             seed=shot.seed,
                             label=f"Shot {shot.sequence_number} START",
                             characters=scene.characters,
@@ -109,6 +123,7 @@ class MockPipeline:
                         path=planned_start_path,
                         prompt=shot.prompt,
                         seed=shot.seed,
+                        generation_parameters=profile_parameters,
                     )
                     shot.planned_start_frame_id = start_asset.id
 
@@ -116,6 +131,8 @@ class MockPipeline:
                     ImageRequest(
                         prompt=f"{shot.prompt} ending",
                         output_path=planned_end_path,
+                        width=profile.width,
+                        height=profile.height,
                         seed=shot.seed + 1,
                         label=f"Shot {shot.sequence_number} END",
                         characters=scene.characters,
@@ -129,6 +146,7 @@ class MockPipeline:
                     path=planned_end_path,
                     prompt=shot.prompt,
                     seed=shot.seed + 1,
+                    generation_parameters=profile_parameters,
                 )
                 shot.planned_end_frame_id = end_asset.id
                 shot.continuity_target_frame_id = end_asset.id
@@ -151,6 +169,7 @@ class MockPipeline:
                         path=audio_path,
                         provider="mock-tts",
                         model="mock-tone-v1",
+                        generation_parameters=profile_parameters,
                         cancel_requested=self.cancel_requested,
                     )
                     if not rerun:
@@ -175,9 +194,12 @@ class MockPipeline:
                             start_frame=planned_start_path,
                             end_frame=planned_end_path,
                             duration=shot.duration,
-                            fps=24,
+                            fps=profile.fps,
                             audio_path=audio_path,
                             seed=shot.seed,
+                            width=profile.width,
+                            height=profile.height,
+                            settings={**shot.generation_settings, **profile_parameters},
                         )
                     )
                     self._check_cancelled()
@@ -197,8 +219,8 @@ class MockPipeline:
                     qa = analyze_video(
                         output,
                         shot.duration,
-                        854,
-                        480,
+                        profile.width,
+                        profile.height,
                         audio_expected=True,
                         cancel_requested=self.cancel_requested,
                     )
@@ -212,6 +234,7 @@ class MockPipeline:
                         model="ffmpeg-xfade-v1",
                         prompt=shot.prompt,
                         seed=shot.seed,
+                        generation_parameters=profile_parameters,
                         cancel_requested=self.cancel_requested,
                     )
                 except Exception:
@@ -250,7 +273,7 @@ class MockPipeline:
                     prompt=shot.prompt,
                     negative_prompt=shot.negative_prompt,
                     seed=shot.seed,
-                    settings=shot.generation_settings,
+                    settings={**shot.generation_settings, **profile_parameters},
                     generation_seconds=time.monotonic() - started,
                     gpu="cpu",
                     input_asset_ids=[
@@ -287,7 +310,7 @@ class MockPipeline:
                 clips.append(output)
                 transitions.append((shot.transition_type, shot.overlap_frame_count))
                 actual_ends.append(actual_end_path)
-                overlap = self._timeline_overlap(shot, shot_index, fps=24)
+                overlap = self._timeline_overlap(shot, shot_index, fps=profile.fps)
                 shot_start = timeline - overlap if shot.transition_type == "crossfade" else timeline
                 if shot.dialogue:
                     subtitles.append(
@@ -313,7 +336,9 @@ class MockPipeline:
             clips,
             transitions,
             render_dir / "final.mp4",
-            fps=24,
+            fps=profile.fps,
+            video_codec=profile.video_codec,
+            audio_codec=profile.audio_codec,
             cancel_requested=self.cancel_requested,
         )
         subtitle_path = write_subtitles(subtitles, render_dir / "final.srt")
@@ -329,6 +354,8 @@ class MockPipeline:
             "version": 1,
             "run_id": run_id,
             "project_id": project.id,
+            "render_profile": profile_name,
+            "profile": profile_parameters,
             "render": str(final_path.relative_to(root)),
             "subtitles": str(subtitle_path.relative_to(root)),
             "thumbnail": str(thumb_path.relative_to(root)),
@@ -358,6 +385,7 @@ class MockPipeline:
             path=final_path,
             provider="ffmpeg",
             model="transition-assembler-v1",
+            generation_parameters=profile_parameters,
             parents=[
                 candidate.output_asset_id
                 for scene in project.scenes
@@ -369,14 +397,18 @@ class MockPipeline:
         )
         render = Render(
             project_id=project.id,
-            render_profile="draft",
+            render_profile=profile_name,
             included_scene_ids=[scene.id for scene in project.scenes],
             included_shot_ids=[shot.id for scene in project.scenes for shot in scene.shots],
             output_path=str(final_path),
-            codec="libx264",
-            resolution="854x480",
-            frame_rate=24,
-            audio_configuration={"codec": "aac", "sample_rate": 48000, "channels": 2},
+            codec=profile.video_codec,
+            resolution=f"{profile.width}x{profile.height}",
+            frame_rate=profile.fps,
+            audio_configuration={
+                "codec": profile.audio_codec,
+                "sample_rate": 48000,
+                "channels": 2,
+            },
             subtitle_configuration={"path": str(subtitle_path)},
             creation_metadata={
                 "run_id": run_id,
@@ -385,6 +417,8 @@ class MockPipeline:
                 "contact_sheet": str(contact_path),
                 "transitions": applied_transitions,
                 "output_asset_id": final_asset.id,
+                "render_profile": profile_name,
+                "profile": profile_parameters,
             },
         )
         project.status = ProjectStatus.COMPLETE.value

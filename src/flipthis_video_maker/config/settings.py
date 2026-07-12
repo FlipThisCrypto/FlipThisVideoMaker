@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     ffprobe_path: str = "ffprobe"
     provider_config: Path = Path("config/providers.yaml")
     worker_config: Path = Path("config/workers.yaml")
+    render_profile_config: Path = Path("config/render-profiles.yaml")
     worker_heartbeat_seconds: float = Field(default=5, gt=0)
     worker_stale_seconds: float = Field(default=20, gt=0)
     bind_host: str = "127.0.0.1"

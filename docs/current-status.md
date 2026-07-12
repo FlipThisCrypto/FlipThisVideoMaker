@@ -26,6 +26,30 @@ trim and 0.5-second crossfade. Every clip and the final output contain 854×480 
 and 48 kHz stereo AAC audio. It validates subtitles, thumbnail, contact sheet, manifest, duration,
 stream layout, transition records, and shot-3 continuity from shot 2's extracted actual ending Asset.
 
+## Active phase checkpoint: effective render profiles
+
+The current checkpoint starts the next reliability phase without changing the exercised draft smoke
+workflow:
+
+- `config/render-profiles.yaml` is loaded through a strict, versioned Pydantic schema. Profile names,
+  even output dimensions, codec names, fallback references, and an acyclic fallback graph are
+  validated. The configured chain is `final -> standard -> draft`.
+- The mock pipeline can resolve a named profile and applies its dimensions, frame rate, and codecs to
+  keyframe generation, candidate video generation, media QA, transition assembly, immutable Asset
+  provenance, Candidate settings, the project manifest, and the persisted Render record.
+- Mock video encoding and the FFmpeg transition assembler accept the resolved codecs. Asset
+  registration accepts generation parameters so provenance is no longer discarded.
+- The render profile is currently the authority for generated width, height, frame rate, and final
+  codecs. The older `Project.fps` field remains persisted for compatibility but is not an override in
+  this new path; API/UI cleanup must make that relationship clear before profile editing is exposed.
+
+This is a tested checkpoint, not completion of the render-profile phase. A render job does not yet
+snapshot its requested/effective profile, so a worker can still observe configuration changed after
+enqueue. Project/API validation, profile discovery, frontend selectors, isolated-shot regeneration,
+requested-versus-effective provenance, and typed provider-owned OOM fallback remain next. Core code
+must never classify OOM by matching arbitrary provider error text, and automatic fallback must never
+move a running job to another GPU.
+
 ## Persistence and recovery
 
 - Migrations `0001` through `0003` contain explicit Alembic operations; application startup does not
@@ -107,7 +131,7 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 | 5 — Media/continuity | Frame extraction, hard/shared/crossfade assembly, thumbnail/contact sheet run | Advanced QA, mix/normalize, mux/burn, bridge variants |
 | 6 — Live backends | Planner protocol tests and adapter/config boundaries exist | Complete protocol fixtures and real ComfyUI/WanGP/Ollama exercise |
 | 7 — Linux operations | API and CPU/GPU worker process lifecycle run; scripts/systemd templates exist | Real CUDA/model workload and long-run operations evidence |
-| 8 — Validation | Matrix below passes locally | Public GitHub CI result after first push |
+| 8 — Validation | Matrix below passes locally; GitHub Actions run `29207968290` passed | Real backend and CUDA workload evidence |
 
 ## Validation matrix
 
@@ -119,7 +143,7 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 | `uv run ruff check .` | Passed |
 | `uv run ruff format --check .` | Passed |
 | `uv run mypy src` | Passed in strict mode |
-| `uv run pytest` | 48 passed |
+| `uv run pytest` | 52 passed |
 | `uv run flipthis-smoke` | Passed with isolated Alembic database |
 | Final `ffprobe` | 31.25 s, H.264 854×480/24 fps, AAC 48 kHz stereo |
 | API real-process health | HTTP 200; clean SIGINT shutdown |
@@ -154,9 +178,14 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 
 ## Next execution order
 
-1. Make render profiles effective in provider requests, add typed provider-owned OOM errors/cleanup,
-   and implement bounded same-device fallback history without guessing backend error text.
-2. Add audio mixing/normalization, expanded QA, and subtitle mux/burn options.
-3. Exercise ComfyUI, WanGP, and Ollama against locally installed backends before enabling them.
-4. Run one real workload on each RTX 4070 independently and record VRAM/health evidence.
-5. Add a maintained Playwright test file to CI and expand render/settings controls.
+1. Snapshot the requested and effective render profile in each render/regeneration Job payload, then
+   inject that immutable snapshot into workers instead of re-reading mutable YAML at execution time.
+2. Validate profiles in project/render APIs, expose discovery, add frontend selectors, and extend the
+   same effective-profile/provenance path to isolated-shot regeneration.
+3. Add typed provider-owned OOM errors and cleanup results, then implement a bounded monotonic
+   `final -> standard -> draft` retry policy under the same already-held physical-GPU lock. Generic
+   error strings must fail normally.
+4. Add audio mixing/normalization, expanded QA, and subtitle mux/burn options.
+5. Exercise ComfyUI, WanGP, and Ollama against locally installed backends before enabling them.
+6. Run one real workload on each RTX 4070 independently and record VRAM/health evidence.
+7. Add a maintained Playwright test file to CI and expand render/settings controls.

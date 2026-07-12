@@ -64,6 +64,8 @@ def assemble_with_transitions(
     output: Path,
     *,
     fps: int,
+    video_codec: str = "libx264",
+    audio_codec: str = "aac",
     cancel_requested: Callable[[], bool] | None = None,
 ) -> tuple[Path, list[dict[str, float | int | str]]]:
     """Assemble normalized A/V clips, applying each transition before its destination clip."""
@@ -169,11 +171,11 @@ def assemble_with_transitions(
             "-map",
             f"[{audio_label}]",
             "-c:v",
-            "libx264",
+            video_codec,
             "-pix_fmt",
             "yuv420p",
             "-c:a",
-            "aac",
+            audio_codec,
             "-ar",
             "48000",
             "-ac",
