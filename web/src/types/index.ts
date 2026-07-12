@@ -9,8 +9,47 @@ export interface Project {
   status: string;
   root_asset_directory: string;
   original_story: string;
+  global_visual_style: string;
+  global_negative_prompt: string;
   created_at: string;
   updated_at: string;
+}
+export interface RenderProfile {
+  name: string;
+  width: number;
+  height: number;
+  fps: number;
+  video_codec: string;
+  audio_codec: string;
+  fallback_profile: string | null;
+}
+export interface RenderProfileCatalog {
+  default_profile: string;
+  profiles: RenderProfile[];
+}
+export interface RenderProfileExecution {
+  version: 1;
+  requested_profile: string;
+  effective_profile: string;
+  profile: Omit<RenderProfile, "name">;
+  fallback_chain: Array<{
+    name: string;
+    profile: Omit<RenderProfile, "name">;
+  }>;
+  fallback_history: Array<{
+    occurred_at: string;
+    reason: "provider_out_of_memory";
+    provider_id: string;
+    operation: string;
+    from_profile: string;
+    to_profile: string;
+    job_attempt: number;
+    gpu_assignment: string;
+    backend_code: string | null;
+    cleanup_action: string;
+    cleanup_completed: boolean;
+    cleanup_retry_safe: boolean;
+  }>;
 }
 export interface Shot {
   id: string;
@@ -54,6 +93,8 @@ export interface Job {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  render_profile_execution: RenderProfileExecution | null;
+  render_profile_execution_error: string | null;
 }
 export interface WorkerStatus {
   id: string;

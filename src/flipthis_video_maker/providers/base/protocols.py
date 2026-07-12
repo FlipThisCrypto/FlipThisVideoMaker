@@ -1,6 +1,10 @@
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
+from flipthis_video_maker.providers.base.errors import (
+    ProviderCleanupResult,
+    ProviderOutOfMemoryError,
+)
 from flipthis_video_maker.providers.base.models import (
     ImageRequest,
     ProviderInfo,
@@ -29,3 +33,20 @@ class VideoProvider(Provider, Protocol):
 
 class StoryPlanner(Provider, Protocol):
     async def plan(self, story: str) -> StoryPlan: ...
+
+
+@runtime_checkable
+class OOMRecoverableProvider(Protocol):
+    """Optional provider-owned cleanup contract for an adapter-classified OOM."""
+
+    async def cleanup_after_oom(self, error: ProviderOutOfMemoryError) -> ProviderCleanupResult: ...
+
+
+__all__ = [
+    "ImageProvider",
+    "OOMRecoverableProvider",
+    "Provider",
+    "StoryPlanner",
+    "TTSProvider",
+    "VideoProvider",
+]

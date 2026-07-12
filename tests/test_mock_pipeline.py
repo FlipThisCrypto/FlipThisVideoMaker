@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from flipthis_video_maker.domain.models import Asset
+from flipthis_video_maker.domain.models import Asset, Project, Scene, Shot
 from flipthis_video_maker.media.ffmpeg import checksum, probe
 from flipthis_video_maker.pipeline.mock_pipeline import MockPipeline, create_sample
 
@@ -14,6 +14,28 @@ def stream_by_type(metadata: dict[str, object], kind: str) -> dict[str, object]:
     streams = metadata["streams"]
     assert isinstance(streams, list)
     return next(stream for stream in streams if stream["codec_type"] == kind)
+
+
+def test_subtitles_are_recomputed_with_the_final_effective_fps() -> None:
+    project = Project(name="Subtitle timing", root_asset_directory="/unused")
+    scene = Scene(number=1)
+    scene.shots = [
+        Shot(sequence_number=1, duration=2, dialogue="First", speaker="Ash"),
+        Shot(
+            sequence_number=2,
+            duration=2,
+            dialogue="Second",
+            speaker="Mira",
+            transition_type="crossfade",
+            overlap_frame_count=12,
+        ),
+    ]
+    project.scenes = [scene]
+
+    entries = MockPipeline._subtitle_entries(project, fps=12)
+
+    assert entries[1][:2] == pytest.approx((1.2, 1.8))
+    assert entries[1][2] == "Mira: Second"
 
 
 @pytest.mark.asyncio
@@ -60,12 +82,19 @@ async def test_mock_pipeline_is_rerunnable_and_preserves_media(db: Session, tmp_
         "hard_cut",
     ]
     assert first_manifest["transitions"][1]["duration"] == pytest.approx(0.5)
+    assert first_manifest["requested_render_profile"] == "draft"
+    assert first_manifest["effective_render_profile"] == "draft"
+    assert first_manifest["render_profile_execution"]["profile"]["width"] == 854
     assert (
         first_manifest["shots"][2]["continuity_source_frame"]
         == first_manifest["shots"][1]["actual_end_frame"]
     )
     for key in ("subtitles", "thumbnail", "contact_sheet"):
         assert (root / first_manifest[key]).is_file()
+    assert all(
+        asset.generation_parameters["render_profile_execution"]["effective_profile"] == "draft"
+        for asset in clip_assets
+    )
 
     second = await MockPipeline(db).run(project.id)
     second_path = Path(second.output_path)

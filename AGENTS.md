@@ -59,6 +59,9 @@ after every change.
 - Do not invent upstream API routes.
 - WanGP submission remains feature-flagged/configuration-driven until verified against current official documentation.
 - ComfyUI workflow JSON comes from administrator-controlled templates, not arbitrary shell input.
+- Only adapters may classify OOM, using structured backend codes or configured numeric CLI exit
+  codes. Automatic fallback requires typed provider-owned retry-safe cleanup and must stay inside the
+  captured profile chain, current Job attempt, queue assignment, and physical-GPU lock.
 - “Prepared” means schema/interface only; “implemented” means tested protocol behavior; “exercised” means a real backend was run.
 - Record licensing and model-weight terms separately from code license terms.
 

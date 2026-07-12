@@ -26,29 +26,40 @@ trim and 0.5-second crossfade. Every clip and the final output contain 854×480 
 and 48 kHz stereo AAC audio. It validates subtitles, thumbnail, contact sheet, manifest, duration,
 stream layout, transition records, and shot-3 continuity from shot 2's extracted actual ending Asset.
 
-## Active phase checkpoint: effective render profiles
+## Effective render profiles and OOM recovery
 
-The current checkpoint starts the next reliability phase without changing the exercised draft smoke
+The render-profile reliability phase is implemented without changing the default draft smoke
 workflow:
 
 - `config/render-profiles.yaml` is loaded through a strict, versioned Pydantic schema. Profile names,
   even output dimensions, codec names, fallback references, and an acyclic fallback graph are
   validated. The configured chain is `final -> standard -> draft`.
-- The mock pipeline can resolve a named profile and applies its dimensions, frame rate, and codecs to
-  keyframe generation, candidate video generation, media QA, transition assembly, immutable Asset
-  provenance, Candidate settings, the project manifest, and the persisted Render record.
+- Project create/update and render/regeneration APIs validate configured profiles. The React UI
+  discovers the catalog and provides accessible project-default, per-render, and per-regeneration
+  selectors.
+- Every new render or shot-regeneration Job captures a versioned immutable execution envelope
+  containing requested/effective values and its complete fallback chain. Legacy queued media jobs
+  capture it once at claim. Tests prove a later YAML mutation cannot change queued work and a manual
+  retry resumes the persisted effective profile.
+- The mock render and isolated-shot pipelines apply captured dimensions, frame rate, and codecs to
+  keyframes, candidate video, exact-FPS media QA, normalized transition assembly, immutable Asset
+  provenance, Candidate settings, continuity packets, manifests, and Render records.
 - Mock video encoding and the FFmpeg transition assembler accept the resolved codecs. Asset
   registration accepts generation parameters so provenance is no longer discarded.
 - The render profile is currently the authority for generated width, height, frame rate, and final
   codecs. The older `Project.fps` field remains persisted for compatibility but is not an override in
-  this new path; API/UI cleanup must make that relationship clear before profile editing is exposed.
+  this path; the UI describes the profile as the output authority.
+- Only typed adapter-owned OOM classifications from profile-sized image or video generation can enter
+  fallback. Cleanup must be provider-owned and explicitly retry-safe. Fallback advances monotonically
+  through the captured, no-more-demanding chain without changing the Job attempt, queue assignment,
+  or already-held physical-GPU lock. Generic error text is proven not to trigger fallback.
+  Requested-to-effective history is persisted, safely logged, exposed in Job responses, and visible
+  in the job queue.
 
-This is a tested checkpoint, not completion of the render-profile phase. A render job does not yet
-snapshot its requested/effective profile, so a worker can still observe configuration changed after
-enqueue. Project/API validation, profile discovery, frontend selectors, isolated-shot regeneration,
-requested-versus-effective provenance, and typed provider-owned OOM fallback remain next. Core code
-must never classify OOM by matching arbitrary provider error text, and automatic fallback must never
-move a running job to another GPU.
+The fallback policy is exercised with deterministic protocol fixtures and a real mock FFmpeg render.
+The generic CLI adapter's configured numeric exit-code classification, child reaping, and failed
+partial cleanup are exercised. No WanGP, ComfyUI, or other persistent backend currently qualifies for
+automatic fallback because its structured OOM and VRAM-release behavior has not been exercised.
 
 ## Persistence and recovery
 
@@ -84,7 +95,8 @@ move a running job to another GPU.
   Gradio route is guessed.
 - Ollama and OpenAI-compatible structured story planners with strict schema validation.
 - Generic administrator-configured CLI image, TTS, and video adapter code using argument arrays
-  without a shell; execution fixtures are missing.
+  without a shell. Numeric OOM classification and cleanup fixtures pass; successful media-generation
+  command fixtures remain missing.
 - Mock lip-sync and interpolation passthrough providers are implemented and discoverable but not
   integrated into the exercised render pipeline.
 - YAML provider registry. Disabled adapters appear in discovery without being reported as healthy.
@@ -125,7 +137,7 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 | Phase | Current evidence | Important remaining gap |
 |---|---|---|
 | 1 — Foundation | API, React app, configuration, migrations, scripts, docs, and CPU tests run | Authentication remains local-only |
-| 2 — Domain/job engine | Persistent SQLite queue, restart/retry, atomic terminal states, heartbeats, GPU locks/admission run | PostgreSQL claims, job leases, and configured concurrency |
+| 2 — Domain/job engine | Persistent queue/retry, atomic terminal states, profile snapshots, typed same-lock OOM fallback, heartbeats, and GPU admission run | PostgreSQL claims, job leases, and configured concurrency |
 | 3 — Mock pipeline | Required four-shot MP4, continuity, subtitles, manifest, assets, and reruns run | Lip-sync/interpolation passthroughs are not pipeline-integrated |
 | 4 — UI | Core project/story/character/shot/candidate/job/render browser workflow run | Controls listed above and maintained Playwright spec |
 | 5 — Media/continuity | Frame extraction, hard/shared/crossfade assembly, thumbnail/contact sheet run | Advanced QA, mix/normalize, mux/burn, bridge variants |
@@ -143,7 +155,7 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 | `uv run ruff check .` | Passed |
 | `uv run ruff format --check .` | Passed |
 | `uv run mypy src` | Passed in strict mode |
-| `uv run pytest` | 52 passed |
+| `uv run pytest` | 78 passed |
 | `uv run flipthis-smoke` | Passed with isolated Alembic database |
 | Final `ffprobe` | 31.25 s, H.264 854×480/24 fps, AAC 48 kHz stereo |
 | API real-process health | HTTP 200; clean SIGINT shutdown |
@@ -153,7 +165,7 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 | GPU discovery/admission | Two independent RTX 4070s discovered; per-device admission tests pass |
 | `pnpm install --frozen-lockfile` | Passed; `pnpm-lock.yaml` exists |
 | `pnpm lint` | Passed with no warnings |
-| `pnpm test` | 3 passed |
+| `pnpm test` | 9 passed |
 | `pnpm build` | Passed |
 | Chromium core workflow | Passed through character/voice, render, and isolated regeneration |
 | Public exposure sweep | No credentials, private assets, generated media, or user-owned skills staged |
@@ -162,8 +174,8 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 ## Remaining engineering risks
 
 1. PostgreSQL-specific `FOR UPDATE SKIP LOCKED` claiming is not implemented or exercised.
-2. Retry handling has attempt logs but lacks provider-owned OOM classification/cleanup and effective
-   fallback render profiles. Core code must not guess OOM from arbitrary provider error strings.
+2. Typed OOM recovery is exercised for fixtures and the mock render path, but no persistent real
+   backend has proven a structured OOM classifier plus retry-safe VRAM cleanup.
 3. Configured `max_concurrent_jobs` is reported but not enforced; each current worker loop is serial.
 4. A stale heartbeat is deliberately not a job lease. Automatic orphan reconciliation/requeueing is
    absent because it could duplicate an external generation process.
@@ -178,14 +190,11 @@ and shot creation buttons, richer render options, and a committed Playwright tes
 
 ## Next execution order
 
-1. Snapshot the requested and effective render profile in each render/regeneration Job payload, then
-   inject that immutable snapshot into workers instead of re-reading mutable YAML at execution time.
-2. Validate profiles in project/render APIs, expose discovery, add frontend selectors, and extend the
-   same effective-profile/provenance path to isolated-shot regeneration.
-3. Add typed provider-owned OOM errors and cleanup results, then implement a bounded monotonic
-   `final -> standard -> draft` retry policy under the same already-held physical-GPU lock. Generic
-   error strings must fail normally.
-4. Add audio mixing/normalization, expanded QA, and subtitle mux/burn options.
-5. Exercise ComfyUI, WanGP, and Ollama against locally installed backends before enabling them.
-6. Run one real workload on each RTX 4070 independently and record VRAM/health evidence.
-7. Add a maintained Playwright test file to CI and expand render/settings controls.
+1. Integrate mock lip-sync/interpolation decisions, add audio mixing/normalization, expanded black /
+   freeze / silence QA, and subtitle mux/burn options.
+2. Add a maintained Playwright test file to CI and finish scene/shot creation, drag ordering, audio
+   reference, provider/settings, and richer render controls.
+3. Add complete successful-command fixtures for generic CLI media providers and complete protocol
+   fixtures for ComfyUI and WanGP.
+4. Exercise ComfyUI, WanGP, and Ollama against locally installed backends before enabling them.
+5. Run one real workload on each RTX 4070 independently and record VRAM/health evidence.

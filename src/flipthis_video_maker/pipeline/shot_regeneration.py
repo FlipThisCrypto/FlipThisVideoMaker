@@ -1,13 +1,28 @@
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from flipthis_video_maker.config.render_profiles import (
+    RenderProfileConfigurationFile,
+    RenderProfileExecution,
+    load_render_profile_configuration,
+)
+from flipthis_video_maker.config.settings import get_settings
 from flipthis_video_maker.domain.models import Asset, Candidate, Project, Scene, Shot
 from flipthis_video_maker.media.ffmpeg import extract_frame
 from flipthis_video_maker.pipeline.mock_pipeline import PipelineCancelled
+from flipthis_video_maker.pipeline.provider_execution import (
+    CleanupCallback,
+    FallbackCallback,
+    execute_with_oom_fallback,
+)
+from flipthis_video_maker.providers.base.errors import (
+    ProviderCleanupResult,
+    ProviderOutOfMemoryError,
+)
 from flipthis_video_maker.providers.base.models import ImageRequest, TTSRequest, VideoRequest
 from flipthis_video_maker.providers.mock.providers import (
     MockImageProvider,
@@ -24,10 +39,22 @@ class MockShotRegenerator:
         db: Session,
         cancel_requested: Callable[[], bool] | None = None,
         progress: Callable[[float, str], None] | None = None,
+        render_profiles: RenderProfileConfigurationFile | None = None,
+        render_profile_execution: RenderProfileExecution | None = None,
+        job_attempt: int = 1,
+        gpu_assignment: str = "cpu",
+        profile_fallback: FallbackCallback | None = None,
+        provider_cleanup: CleanupCallback | None = None,
     ) -> None:
         self.db = db
         self.cancel_requested = cancel_requested
         self.progress = progress
+        self.render_profiles = render_profiles
+        self.render_profile_execution = render_profile_execution
+        self.job_attempt = job_attempt
+        self.gpu_assignment = gpu_assignment
+        self.profile_fallback = profile_fallback
+        self.provider_cleanup = provider_cleanup
         self.images = MockImageProvider()
         self.tts = MockTTSProvider()
         self.video = MockVideoProvider(cancel_requested)
@@ -50,6 +77,21 @@ class MockShotRegenerator:
         project = self.db.get(Project, scene.project_id)
         if project is None:
             raise RuntimeError("Shot project is missing")
+        if self.render_profile_execution is not None:
+            execution = self.render_profile_execution
+        else:
+            profiles = self.render_profiles or load_render_profile_configuration(
+                get_settings().render_profile_config
+            )
+            execution = RenderProfileExecution.resolve(profiles, project.resolution_profile)
+        profile = execution.profile
+        profile_parameters = execution.generation_parameters()
+        execution_payload = execution.model_dump(mode="json")
+        profile_provenance = {
+            **profile_parameters,
+            "requested_render_profile": execution.requested_profile,
+            "render_profile_execution": execution_payload,
+        }
         self._check_cancelled()
         self._report_progress(0.1, "preparing shot inputs")
 
@@ -74,15 +116,34 @@ class MockShotRegenerator:
         start_asset = self._conditioning_start(shot)
         if start_asset is None:
             start_path = root / "frames" / f"planned-start-{candidate_seed}.png"
-            await self.images.generate(
-                ImageRequest(
-                    prompt=f"{candidate_prompt} opening",
-                    output_path=start_path,
-                    seed=candidate_seed,
-                    label=f"Shot {shot.sequence_number} START",
-                    characters=scene.characters,
+
+            async def generate_start(active: RenderProfileExecution) -> Path:
+                active_profile = active.profile
+                return await self.images.generate(
+                    ImageRequest(
+                        prompt=f"{candidate_prompt} opening",
+                        output_path=start_path,
+                        width=active_profile.width,
+                        height=active_profile.height,
+                        seed=candidate_seed,
+                        label=f"Shot {shot.sequence_number} START",
+                        characters=scene.characters,
+                    )
                 )
+
+            _, execution = await self._execute_provider(
+                self.images,
+                generate_start,
+                execution,
             )
+            profile = execution.profile
+            profile_parameters = execution.generation_parameters()
+            execution_payload = execution.model_dump(mode="json")
+            profile_provenance = {
+                **profile_parameters,
+                "requested_render_profile": execution.requested_profile,
+                "render_profile_execution": execution_payload,
+            }
             start_asset = register_asset(
                 self.db,
                 project_id=project.id,
@@ -91,20 +152,40 @@ class MockShotRegenerator:
                 path=start_path,
                 prompt=candidate_prompt,
                 seed=candidate_seed,
+                generation_parameters=profile_provenance,
             )
         else:
             start_path = Path(start_asset.file_path)
 
         end_path = root / "frames" / f"planned-end-{candidate_seed}.png"
-        await self.images.generate(
-            ImageRequest(
-                prompt=f"{candidate_prompt} ending",
-                output_path=end_path,
-                seed=candidate_seed + 1,
-                label=f"Shot {shot.sequence_number} END",
-                characters=scene.characters,
+
+        async def generate_end(active: RenderProfileExecution) -> Path:
+            active_profile = active.profile
+            return await self.images.generate(
+                ImageRequest(
+                    prompt=f"{candidate_prompt} ending",
+                    output_path=end_path,
+                    width=active_profile.width,
+                    height=active_profile.height,
+                    seed=candidate_seed + 1,
+                    label=f"Shot {shot.sequence_number} END",
+                    characters=scene.characters,
+                )
             )
+
+        _, execution = await self._execute_provider(
+            self.images,
+            generate_end,
+            execution,
         )
+        profile = execution.profile
+        profile_parameters = execution.generation_parameters()
+        execution_payload = execution.model_dump(mode="json")
+        profile_provenance = {
+            **profile_parameters,
+            "requested_render_profile": execution.requested_profile,
+            "render_profile_execution": execution_payload,
+        }
         end_asset = register_asset(
             self.db,
             project_id=project.id,
@@ -113,6 +194,7 @@ class MockShotRegenerator:
             path=end_path,
             prompt=candidate_prompt,
             seed=candidate_seed + 1,
+            generation_parameters=profile_provenance,
         )
 
         audio_path: Path | None = None
@@ -134,6 +216,7 @@ class MockShotRegenerator:
                 path=audio_path,
                 provider="mock-tts",
                 model="mock-tone-v1",
+                generation_parameters=profile_provenance,
                 cancel_requested=self.cancel_requested,
             )
             input_assets.append(audio_asset.id)
@@ -144,19 +227,38 @@ class MockShotRegenerator:
         self.db.commit()
         output = root / "candidates" / f"candidate-{candidate_seed}.mp4"
         started = time.monotonic()
-        await self.video.generate(
-            VideoRequest(
-                prompt=candidate_prompt,
-                output_path=output,
-                start_frame=start_path,
-                end_frame=end_path,
-                duration=shot.duration,
-                fps=24,
-                audio_path=audio_path,
-                seed=candidate_seed,
-                settings=dict(candidate_settings),
+
+        async def generate_video(active: RenderProfileExecution) -> Path:
+            active_profile = active.profile
+            return await self.video.generate(
+                VideoRequest(
+                    prompt=candidate_prompt,
+                    output_path=output,
+                    start_frame=start_path,
+                    end_frame=end_path,
+                    duration=shot.duration,
+                    fps=active_profile.fps,
+                    audio_path=audio_path,
+                    seed=candidate_seed,
+                    width=active_profile.width,
+                    height=active_profile.height,
+                    settings={**candidate_settings, **active.generation_parameters()},
+                )
             )
+
+        output, execution = await self._execute_provider(
+            self.video,
+            generate_video,
+            execution,
         )
+        profile = execution.profile
+        profile_parameters = execution.generation_parameters()
+        execution_payload = execution.model_dump(mode="json")
+        profile_provenance = {
+            **profile_parameters,
+            "requested_render_profile": execution.requested_profile,
+            "render_profile_execution": execution_payload,
+        }
         self._check_cancelled()
         self._report_progress(0.75, "extracting candidate frames")
         actual_start_path = root / "frames" / f"actual-start-{candidate_seed}.png"
@@ -171,8 +273,9 @@ class MockShotRegenerator:
         qa = analyze_video(
             output,
             shot.duration,
-            854,
-            480,
+            profile.width,
+            profile.height,
+            profile.fps,
             audio_expected=True,
             cancel_requested=self.cancel_requested,
         )
@@ -187,6 +290,7 @@ class MockShotRegenerator:
             prompt=candidate_prompt,
             seed=candidate_seed,
             parents=input_assets,
+            generation_parameters=profile_provenance,
             cancel_requested=self.cancel_requested,
         )
         actual_start = register_asset(
@@ -196,6 +300,7 @@ class MockShotRegenerator:
             kind="actual_start_frame",
             path=actual_start_path,
             parents=[video_asset.id],
+            generation_parameters=profile_provenance,
         )
         actual_end = register_asset(
             self.db,
@@ -204,6 +309,7 @@ class MockShotRegenerator:
             kind="actual_end_frame",
             path=actual_end_path,
             parents=[video_asset.id],
+            generation_parameters=profile_provenance,
         )
         candidate = Candidate(
             shot_id=shot.id,
@@ -212,9 +318,12 @@ class MockShotRegenerator:
             prompt=candidate_prompt,
             negative_prompt=candidate_negative,
             seed=candidate_seed,
-            settings=dict(candidate_settings),
+            settings={
+                **candidate_settings,
+                "render_profile_execution": execution_payload,
+            },
             generation_seconds=time.monotonic() - started,
-            gpu="cpu",
+            gpu=self.gpu_assignment,
             input_asset_ids=input_assets,
             output_asset_id=video_asset.id,
             first_frame_asset_id=actual_start.id,
@@ -248,3 +357,31 @@ class MockShotRegenerator:
     def _report_progress(self, value: float, stage: str) -> None:
         if self.progress:
             self.progress(value, stage)
+
+    async def _execute_provider[ResultT](
+        self,
+        provider: object,
+        operation: Callable[[RenderProfileExecution], Awaitable[ResultT]],
+        execution: RenderProfileExecution,
+    ) -> tuple[ResultT, RenderProfileExecution]:
+        def record_fallback(
+            advanced: RenderProfileExecution,
+            error: ProviderOutOfMemoryError,
+            cleanup: ProviderCleanupResult,
+        ) -> None:
+            self.render_profile_execution = advanced
+            if self.profile_fallback is not None:
+                self.profile_fallback(advanced, error, cleanup)
+
+        result, effective = await execute_with_oom_fallback(
+            provider,
+            operation,
+            execution,
+            job_attempt=self.job_attempt,
+            gpu_assignment=self.gpu_assignment,
+            on_fallback=record_fallback,
+            on_cleanup=self.provider_cleanup,
+            check_cancelled=self._check_cancelled,
+        )
+        self.render_profile_execution = effective
+        return result, effective

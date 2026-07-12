@@ -8,7 +8,9 @@ The exercised milestone is a deterministic CPU-only 31.25-second four-shot rende
 audio/video streams, immutable run versions, actual-ending-frame continuity, shared-frame trimming,
 a real crossfade, a hard cut, subtitles, thumbnail, contact sheet, and manifest. Persisted worker
 heartbeats, active FFmpeg cancellation, atomic job completion/cancellation, and per-device VRAM
-admission provide the current recovery and scheduling boundary.
+admission provide the current recovery and scheduling boundary. Render and shot-regeneration jobs
+capture immutable effective profiles; typed provider-owned image/video OOM recovery can safely
+advance a captured lower-profile chain without changing GPU or Job attempt.
 
 ## Quick start
 
@@ -80,7 +82,8 @@ Use the [documentation map](docs/README.md) as the entry point for the full guid
 - **Planned:** no working protocol behavior exists yet.
 
 At present, deterministic planning/image/TTS/video providers are exercised. Ollama and
-OpenAI-compatible planner contracts have protocol tests. ComfyUI, WanGP headless, and generic CLI
-execution paths are implemented/configurable but still need complete protocol fixtures and have not
-been exercised against real model backends. See [provider integration](docs/providers.md) for exact
-truth labels.
+OpenAI-compatible planner contracts have protocol tests. Generic CLI numeric OOM classification and
+partial cleanup have protocol fixtures, while successful media commands remain unexercised. ComfyUI
+and WanGP headless paths are implemented/configurable but still need complete protocol fixtures and
+have not been exercised against real model backends. See [provider integration](docs/providers.md)
+for exact truth labels.

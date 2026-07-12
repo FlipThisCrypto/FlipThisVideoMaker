@@ -64,6 +64,8 @@ def assemble_with_transitions(
     output: Path,
     *,
     fps: int,
+    width: int,
+    height: int,
     video_codec: str = "libx264",
     audio_codec: str = "aac",
     cancel_requested: Callable[[], bool] | None = None,
@@ -89,7 +91,10 @@ def assemble_with_transitions(
         durations.append(duration(clip, cancel_requested=cancel_requested))
         filters.extend(
             [
-                f"[{index}:v]fps={fps},format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[v{index}]",
+                (
+                    f"[{index}:v]scale={width}:{height}:flags=lanczos,setsar=1,"
+                    f"fps={fps},format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[v{index}]"
+                ),
                 (
                     f"[{index}:a]aresample=48000,"
                     "aformat=sample_fmts=fltp:channel_layouts=stereo,"

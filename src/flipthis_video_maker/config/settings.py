@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 100
     max_job_retries: int = 2
     max_cpu_jobs: int = 2
-    default_render_profile: Literal["draft", "standard", "final"] = "draft"
+    default_render_profile: str = Field(default="draft", min_length=1, max_length=40)
     auth_mode: Literal["local", "token"] = "local"
     log_level: str = "INFO"
     watermark_enabled: bool = False

@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,13 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from flipthis_video_maker.config.render_profiles import (
+    RENDER_PROFILE_EXECUTION_KEY,
+    RenderProfileExecution,
+    RenderProfileFallbackRecord,
+    load_render_profile_configuration,
+    render_profile_execution_from_payload,
+)
 from flipthis_video_maker.domain.enums import JobState, ShotStatus
 from flipthis_video_maker.domain.models import Asset, Candidate, Job, Scene, Shot
 from flipthis_video_maker.media.ffmpeg import checksum, run
@@ -105,6 +113,125 @@ def test_atomic_cancellation_wins_over_job_success(db: Session, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_worker_uses_the_immutable_enqueued_render_profile(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profiles = load_render_profile_configuration(Path("config/render-profiles.yaml"))
+    execution = RenderProfileExecution.resolve(profiles, "standard")
+    project = create_sample(db, tmp_path / "project")
+    project.resolution_profile = "draft"
+    job = Job(
+        job_type="mock_project_render",
+        project_id=project.id,
+        gpu_assignment="cpu",
+        payload={RENDER_PROFILE_EXECUTION_KEY: execution.model_dump(mode="json")},
+    )
+    db.add(job)
+    db.commit()
+    observed: list[RenderProfileExecution] = []
+
+    async def capture_profile(pipeline: MockPipeline, _project_id: str) -> SimpleNamespace:
+        assert pipeline.render_profile_execution is not None
+        observed.append(pipeline.render_profile_execution)
+        return SimpleNamespace(creation_metadata={"output_asset_id": "standard-output"})
+
+    profiles.profiles["standard"] = profiles.require("draft")
+    monkeypatch.setattr(MockPipeline, "run", capture_profile)
+
+    assert await process_next(db, "cpu", render_profiles=profiles)
+    db.refresh(job)
+    persisted = render_profile_execution_from_payload(job.payload)
+    assert job.state == JobState.SUCCEEDED.value
+    assert observed[0].effective_profile == "standard"
+    assert observed[0].profile.width == 1280
+    assert persisted == execution
+
+
+@pytest.mark.asyncio
+async def test_worker_snapshots_a_legacy_job_once_at_claim(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profiles = load_render_profile_configuration(Path("config/render-profiles.yaml"))
+    project = create_sample(db, tmp_path / "project")
+    project.resolution_profile = "standard"
+    job = Job(job_type="mock_project_render", project_id=project.id, gpu_assignment="cpu")
+    db.add(job)
+    db.commit()
+
+    async def finish(pipeline: MockPipeline, _project_id: str) -> SimpleNamespace:
+        assert pipeline.render_profile_execution is not None
+        assert pipeline.render_profile_execution.profile.width == 1280
+        return SimpleNamespace(creation_metadata={"output_asset_id": "legacy-output"})
+
+    monkeypatch.setattr(MockPipeline, "run", finish)
+    assert await process_next(db, "cpu", render_profiles=profiles)
+    db.refresh(job)
+    execution = render_profile_execution_from_payload(job.payload)
+    assert execution.requested_profile == "standard"
+    assert execution.effective_profile == "standard"
+    assert execution.profile.width == 1280
+
+
+@pytest.mark.asyncio
+async def test_manual_retry_resumes_the_persisted_effective_fallback_profile(
+    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profiles = load_render_profile_configuration(Path("config/render-profiles.yaml"))
+    execution = RenderProfileExecution.resolve(profiles, "final").advance(
+        RenderProfileFallbackRecord(
+            occurred_at=datetime(2026, 7, 12, tzinfo=UTC),
+            provider_id="fixture-video",
+            operation="video_generation",
+            from_profile="final",
+            to_profile="standard",
+            job_attempt=1,
+            gpu_assignment="gpu0",
+            backend_code="fixture_oom",
+            cleanup_action="fixture_process_reaped",
+            cleanup_completed=True,
+            cleanup_retry_safe=True,
+        )
+    )
+    project = create_sample(db, tmp_path / "project")
+    job = Job(
+        job_type="mock_project_render",
+        project_id=project.id,
+        gpu_assignment="cpu",
+        state=JobState.FAILED.value,
+        attempt_number=1,
+        payload={RENDER_PROFILE_EXECUTION_KEY: execution.model_dump(mode="json")},
+    )
+    db.add(job)
+    db.commit()
+    job_id = job.id
+    bind = db.get_bind()
+    db.close()
+    observed: list[RenderProfileExecution] = []
+
+    async def capture_profile(pipeline: MockPipeline, _project_id: str) -> SimpleNamespace:
+        assert pipeline.render_profile_execution is not None
+        observed.append(pipeline.render_profile_execution)
+        return SimpleNamespace(creation_metadata={"output_asset_id": "retry-output"})
+
+    monkeypatch.setattr(MockPipeline, "run", capture_profile)
+    with Session(bind) as api:
+        failed = api.get(Job, job_id)
+        assert failed is not None
+        retry(api, failed, max_retries=2)
+    with Session(bind) as worker:
+        assert await process_next(worker, "cpu", render_profiles=profiles)
+    with Session(bind) as check:
+        succeeded = check.get(Job, job_id)
+        assert succeeded is not None
+        persisted = render_profile_execution_from_payload(succeeded.payload)
+        assert succeeded.state == JobState.SUCCEEDED.value
+        assert succeeded.attempt_number == 2
+        assert persisted.effective_profile == "standard"
+        assert len(persisted.fallback_history) == 1
+        assert observed == [persisted]
+
+
+@pytest.mark.asyncio
 async def test_failed_persistent_job_retries_to_a_final_asset(
     db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -191,6 +318,13 @@ async def test_failed_persistent_job_retries_to_a_final_asset(
         assert len(candidates) == 2
         regenerated = next(item for item in candidates if item.id != selected_candidate_id)
         assert regenerated.disposition == "pending"
+        assert regenerated.settings["render_profile_execution"]["effective_profile"] == "draft"
+        regenerated_asset = final_api.get(Asset, regenerated.output_asset_id)
+        assert regenerated_asset is not None
+        assert (
+            regenerated_asset.generation_parameters["render_profile_execution"]["effective_profile"]
+            == "draft"
+        )
         selected_asset = final_api.get(
             Asset,
             next(item for item in candidates if item.id == selected_candidate_id).output_asset_id,

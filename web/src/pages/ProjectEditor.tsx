@@ -2,11 +2,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { Candidate, Project, Scene, Shot } from "../types";
+import {
+  enqueueProjectRender,
+  enqueueShotRegeneration,
+} from "../api/generation";
+import { useRenderProfiles } from "../api/renderProfiles";
+import { RenderProfileSelect } from "../components/RenderProfileSelect";
+import type { Candidate, Project, RenderProfile, Scene, Shot } from "../types";
 export function ProjectEditor() {
   const { id } = useParams();
   const client = useQueryClient();
   const [story, setStory] = useState("");
+  const [projectProfile, setProjectProfile] = useState("");
+  const [renderProfile, setRenderProfile] = useState("");
+  const profileCatalog = useRenderProfiles();
   const { data: project } = useQuery({
     queryKey: ["project", id],
     queryFn: () => api<Project>(`/projects/${id}`),
@@ -20,8 +29,26 @@ export function ProjectEditor() {
     queryFn: () => api<Scene[]>(`/projects/${id}/scenes`),
   });
   const render = useMutation({
-    mutationFn: () => api(`/projects/${id}/render`, { method: "POST" }),
+    mutationFn: (profile: string) => enqueueProjectRender(id!, profile),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+  const saveProjectProfile = useMutation({
+    mutationFn: () =>
+      api<Project>(`/projects/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: project!.name,
+          description: project!.description,
+          target_duration: project!.target_duration,
+          aspect_ratio: project!.aspect_ratio,
+          resolution_profile: projectProfile,
+          fps: project!.fps,
+          global_visual_style: project!.global_visual_style,
+          global_negative_prompt: project!.global_negative_prompt,
+        }),
+      }),
+    onSuccess: () =>
+      void client.invalidateQueries({ queryKey: ["project", id] }),
   });
   const saveStory = useMutation({
     mutationFn: () =>
@@ -42,28 +69,114 @@ export function ProjectEditor() {
       void client.invalidateQueries({ queryKey: ["shots", id] });
     },
   });
+  const originalStory = project?.original_story;
+  const storedProfile = project?.resolution_profile;
   useEffect(() => {
-    if (project) setStory(project.original_story);
-  }, [project]);
+    if (originalStory !== undefined) setStory(originalStory);
+  }, [originalStory]);
+  useEffect(() => {
+    setProjectProfile("");
+    setRenderProfile("");
+  }, [id]);
+  useEffect(() => {
+    if (!storedProfile) return;
+    setProjectProfile(storedProfile);
+    setRenderProfile((current) => current || storedProfile);
+  }, [id, storedProfile]);
   if (!project) return <p>Loading…</p>;
+  const configuredProfiles = profileCatalog.data?.profiles ?? [];
+  const projectProfileIsConfigured = configuredProfiles.some(
+    (profile) => profile.name === projectProfile,
+  );
+  const renderProfileIsConfigured = configuredProfiles.some(
+    (profile) => profile.name === renderProfile,
+  );
   return (
     <>
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-bold">{project.name}</h1>
           <p className="text-slate-400">
-            {project.aspect_ratio} · {project.fps}fps ·{" "}
-            {project.resolution_profile}
+            {project.aspect_ratio} · {project.resolution_profile} default
           </p>
         </div>
-        <div className="flex gap-3">
-          <Link className="button" to={`/projects/${id}/characters`}>
-            Characters & voices
-          </Link>
+        <Link className="button" to={`/projects/${id}/characters`}>
+          Characters & voices
+        </Link>
+      </div>
+      {profileCatalog.isError && (
+        <p className="card mb-6 text-red-300" role="alert">
+          Render profiles could not be loaded. Existing project data remains
+          available, but profile choices cannot be changed.
+        </p>
+      )}
+      <div className="mb-6 grid gap-4 md:grid-cols-2">
+        <section className="card">
+          <h2 className="mb-3 text-xl font-bold">Project settings</h2>
+          <RenderProfileSelect
+            label="Default render profile"
+            profiles={configuredProfiles}
+            value={projectProfile}
+            onChange={(profile) => {
+              saveProjectProfile.reset();
+              setProjectProfile(profile);
+            }}
+            disabled={
+              profileCatalog.isPending ||
+              profileCatalog.isError ||
+              saveProjectProfile.isPending
+            }
+          />
           <button
-            className="button"
-            disabled={shots.length === 0 || render.isPending}
-            onClick={() => render.mutate()}
+            className="button mt-3"
+            disabled={
+              saveProjectProfile.isPending ||
+              !projectProfile ||
+              !projectProfileIsConfigured ||
+              projectProfile === project.resolution_profile
+            }
+            onClick={() => saveProjectProfile.mutate()}
+          >
+            Save default profile
+          </button>
+          {saveProjectProfile.isSuccess && (
+            <p className="mt-2 text-sm text-teal-200" aria-live="polite">
+              Project default updated.
+            </p>
+          )}
+          {saveProjectProfile.isError && (
+            <p className="mt-2 text-sm text-red-300" role="alert">
+              Profile update failed: {saveProjectProfile.error.message}
+            </p>
+          )}
+        </section>
+        <section className="card">
+          <h2 className="mb-3 text-xl font-bold">Queue render</h2>
+          <RenderProfileSelect
+            label="Profile for this render"
+            profiles={configuredProfiles}
+            value={renderProfile}
+            onChange={setRenderProfile}
+            disabled={
+              profileCatalog.isPending ||
+              profileCatalog.isError ||
+              render.isPending
+            }
+          />
+          <p className="mt-2 text-xs text-slate-400">
+            This choice applies to the queued render without changing the
+            project default.
+          </p>
+          <button
+            className="button mt-3"
+            disabled={
+              shots.length === 0 ||
+              render.isPending ||
+              profileCatalog.isPending ||
+              profileCatalog.isError ||
+              !renderProfileIsConfigured
+            }
+            onClick={() => render.mutate(renderProfile)}
             title={
               shots.length === 0
                 ? "Add storyboard shots before rendering"
@@ -72,7 +185,17 @@ export function ProjectEditor() {
           >
             Render with mocks
           </button>
-        </div>
+          {render.isSuccess && (
+            <p className="mt-2 text-sm text-teal-200" aria-live="polite">
+              Render queued with the {render.variables} profile.
+            </p>
+          )}
+          {render.isError && (
+            <p className="mt-2 text-sm text-red-300" role="alert">
+              Render could not be queued: {render.error.message}
+            </p>
+          )}
+        </section>
       </div>
       <section className="card mb-6">
         <h2 className="mb-3 text-xl font-bold">Story</h2>
@@ -120,14 +243,30 @@ export function ProjectEditor() {
       )}
       <div className="grid gap-4 md:grid-cols-2">
         {shots.map((shot) => (
-          <ShotCard key={shot.id} projectId={id!} shot={shot} />
+          <ShotCard
+            key={shot.id}
+            projectId={id!}
+            shot={shot}
+            renderProfiles={configuredProfiles}
+            defaultRenderProfile={project.resolution_profile}
+          />
         ))}
       </div>
     </>
   );
 }
 
-function ShotCard({ projectId, shot }: { projectId: string; shot: Shot }) {
+function ShotCard({
+  projectId,
+  shot,
+  renderProfiles,
+  defaultRenderProfile,
+}: {
+  projectId: string;
+  shot: Shot;
+  renderProfiles: RenderProfile[];
+  defaultRenderProfile: string;
+}) {
   const client = useQueryClient();
   const [prompt, setPrompt] = useState(shot.prompt);
   const [negativePrompt, setNegativePrompt] = useState(shot.negative_prompt);
@@ -283,7 +422,11 @@ function ShotCard({ projectId, shot }: { projectId: string; shot: Shot }) {
           {JSON.stringify(shot.continuity_packet, null, 2)}
         </pre>
       </details>
-      <CandidatePanel shot={shot} />
+      <CandidatePanel
+        shot={shot}
+        renderProfiles={renderProfiles}
+        defaultRenderProfile={defaultRenderProfile}
+      />
     </article>
   );
 }
@@ -361,20 +504,33 @@ function SceneEditor({
   );
 }
 
-function CandidatePanel({ shot }: { shot: Shot }) {
+function CandidatePanel({
+  shot,
+  renderProfiles,
+  defaultRenderProfile,
+}: {
+  shot: Shot;
+  renderProfiles: RenderProfile[];
+  defaultRenderProfile: string;
+}) {
   const client = useQueryClient();
+  const [regenerationProfile, setRegenerationProfile] =
+    useState(defaultRenderProfile);
   const { data: candidates = [] } = useQuery({
     queryKey: ["candidates", shot.id],
     queryFn: () => api<Candidate[]>(`/shots/${shot.id}/candidates`),
   });
   const regenerate = useMutation({
     mutationFn: (sameSeed: boolean) =>
-      api(`/shots/${shot.id}/regenerate`, {
-        method: "POST",
-        body: JSON.stringify({ same_seed: sameSeed }),
-      }),
+      enqueueShotRegeneration(shot.id, sameSeed, regenerationProfile),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
   });
+  useEffect(() => {
+    setRegenerationProfile(defaultRenderProfile);
+  }, [defaultRenderProfile]);
+  const regenerationProfileIsConfigured = renderProfiles.some(
+    (profile) => profile.name === regenerationProfile,
+  );
   async function action(candidateId: string, operation: "select" | "reject") {
     const path =
       operation === "select"
@@ -394,15 +550,35 @@ function CandidatePanel({ shot }: { shot: Shot }) {
     <section className="mt-4 border-t border-slate-700 pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-bold">Candidates ({candidates.length})</h3>
-        <div className="flex gap-2">
-          <button className="button" onClick={() => regenerate.mutate(true)}>
-            Regenerate same seed
-          </button>
-          <button className="button" onClick={() => regenerate.mutate(false)}>
-            Regenerate new seed
-          </button>
-        </div>
       </div>
+      <div className="mt-3 grid items-end gap-2 md:grid-cols-[1fr_auto_auto]">
+        <RenderProfileSelect
+          label={`Shot ${shot.sequence_number} regeneration profile`}
+          profiles={renderProfiles}
+          value={regenerationProfile}
+          onChange={setRegenerationProfile}
+          disabled={renderProfiles.length === 0 || regenerate.isPending}
+        />
+        <button
+          className="button"
+          disabled={regenerate.isPending || !regenerationProfileIsConfigured}
+          onClick={() => regenerate.mutate(true)}
+        >
+          Regenerate same seed
+        </button>
+        <button
+          className="button"
+          disabled={regenerate.isPending || !regenerationProfileIsConfigured}
+          onClick={() => regenerate.mutate(false)}
+        >
+          Regenerate new seed
+        </button>
+      </div>
+      {regenerate.isError && (
+        <p className="mt-2 text-sm text-red-300" role="alert">
+          Regeneration could not be queued: {regenerate.error.message}
+        </p>
+      )}
       {candidates.map((candidate) => (
         <article
           className="mt-3 rounded border border-slate-600 p-3"

@@ -9,12 +9,19 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from flipthis_video_maker.api.render_profiles import (
+    load_configured_render_profiles,
+    resolve_render_profile,
+)
 from flipthis_video_maker.api.schemas import (
     CharacterCreate,
     CharacterRead,
     JobRead,
     ProjectCreate,
+    ProjectPatch,
     ProjectRead,
+    ProjectRenderRequest,
+    RenderProfileCatalogRead,
     RenderRead,
     ShotPatch,
     ShotRead,
@@ -22,6 +29,7 @@ from flipthis_video_maker.api.schemas import (
     VoiceProfileRead,
     WorkerRead,
 )
+from flipthis_video_maker.config.render_profiles import RENDER_PROFILE_EXECUTION_KEY
 from flipthis_video_maker.config.settings import Settings, get_settings
 from flipthis_video_maker.config.workers import load_worker_configuration
 from flipthis_video_maker.database.session import get_db
@@ -71,6 +79,8 @@ def health(db: DB) -> dict[str, object]:
 
 @router.post("/projects", response_model=ProjectRead, status_code=201)
 def create_project(body: ProjectCreate, db: DB, settings: Config) -> Project:
+    requested_profile = body.resolution_profile or settings.default_render_profile
+    execution = resolve_render_profile(settings, requested_profile)
     identifier = str(uuid.uuid4())
     root = settings.data_dir / identifier
     for directory in (
@@ -85,7 +95,9 @@ def create_project(body: ProjectCreate, db: DB, settings: Config) -> Project:
         "manifests",
     ):
         (root / directory).mkdir(parents=True, exist_ok=True)
-    project = Project(id=identifier, root_asset_directory=str(root), **body.model_dump())
+    values = body.model_dump()
+    values["resolution_profile"] = execution.effective_profile
+    project = Project(id=identifier, root_asset_directory=str(root), **values)
     db.add(project)
     db.commit()
     return project
@@ -102,9 +114,13 @@ def get_project(project_id: str, db: DB) -> Project:
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectRead)
-def update_project(project_id: str, body: ProjectCreate, db: DB) -> Project:
+def update_project(project_id: str, body: ProjectPatch, db: DB, settings: Config) -> Project:
     project = require(db, Project, project_id)
-    for key, value in body.model_dump().items():
+    values = body.model_dump(exclude_unset=True, exclude_none=True)
+    if body.resolution_profile is not None:
+        execution = resolve_render_profile(settings, body.resolution_profile)
+        values["resolution_profile"] = execution.effective_profile
+    for key, value in values.items():
         setattr(project, key, value)
     db.commit()
     return project
@@ -231,7 +247,12 @@ def select_candidate(shot_id: str, candidate_id: str, db: DB) -> dict[str, str]:
 
 
 @router.post("/projects/{project_id}/render", status_code=202)
-def enqueue_render(project_id: str, db: DB) -> JobRead:
+def enqueue_render(
+    project_id: str,
+    db: DB,
+    settings: Config,
+    body: ProjectRenderRequest | None = None,
+) -> JobRead:
     project = require(db, Project, project_id)
     project_shots = [shot for scene in project.scenes for shot in scene.shots]
     if not project_shots:
@@ -243,8 +264,18 @@ def enqueue_render(project_id: str, db: DB) -> JobRead:
     }
     if any(shot.status not in renderable_states for shot in project_shots):
         raise HTTPException(409, "Every shot must be approved before rendering")
+    requested_profile = (
+        body.render_profile if body and body.render_profile else project.resolution_profile
+    )
+    execution = resolve_render_profile(settings, requested_profile)
     job = Job(
-        job_type="mock_project_render", project_id=project_id, provider="mock", gpu_assignment="cpu"
+        job_type="mock_project_render",
+        project_id=project_id,
+        provider="mock",
+        gpu_assignment="cpu",
+        payload={
+            RENDER_PROFILE_EXECUTION_KEY: execution.model_dump(mode="json"),
+        },
     )
     db.add(job)
     db.commit()
@@ -335,6 +366,18 @@ def retry_job(job_id: str, db: DB, settings: Config) -> dict[str, str]:
 @router.get("/providers")
 def providers(settings: Config) -> list[dict[str, Any]]:
     return [item.model_dump(mode="json") for item in provider_records(settings.provider_config)]
+
+
+@router.get("/render-profiles", response_model=RenderProfileCatalogRead)
+def render_profiles(settings: Config) -> RenderProfileCatalogRead:
+    configured = load_configured_render_profiles(settings)
+    return RenderProfileCatalogRead(
+        default_profile=settings.default_render_profile,
+        profiles=[
+            {"name": name, **profile.model_dump(mode="json")}
+            for name, profile in configured.profiles.items()
+        ],
+    )
 
 
 @router.get("/providers/health")

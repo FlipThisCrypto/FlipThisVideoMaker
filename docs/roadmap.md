@@ -1,9 +1,10 @@
 # Roadmap
 
 The exercised CPU mock slice now includes active FFmpeg cancellation, persistent worker heartbeats,
-atomic terminal job transitions, and fail-closed per-device VRAM admission. Next milestones are
-effective render-profile/fallback policy, provider-owned OOM cleanup, black/freeze/silence QA, audio
-ducking/normalization, subtitle muxing, and a committed Playwright workflow in CI.
+atomic terminal job transitions, immutable render-profile execution, typed provider-owned same-device
+OOM fallback, and fail-closed per-device VRAM admission. Next milestones are black/freeze/silence QA,
+audio ducking/normalization, subtitle muxing, mock lip-sync/interpolation orchestration, and a
+committed Playwright workflow in CI.
 
 Then exercise real ComfyUI workflows, WanGP headless execution, and Ollama planning before running
 independent 12 GB profiling on GPU 0 and GPU 1 for selected video/image/TTS/lip-sync/interpolation

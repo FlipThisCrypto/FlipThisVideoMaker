@@ -6,6 +6,13 @@ dialogue WAV, planned keyframes, candidate video, true boundary-frame extraction
 QA, and final FFmpeg assembly. Each stage records Assets with checksums and provenance. New attempts
 use a unique run directory and never overwrite successful output.
 
+Render and isolated-regeneration Jobs carry an immutable render-profile execution envelope captured
+before enqueue. It drives provider dimensions/FPS, exact media QA, FFmpeg normalization, codecs, and
+all output provenance. A typed image/video provider OOM may advance only to the next captured profile
+after that provider reports completed retry-safe cleanup. This automatic retry stays inside the
+current Job attempt and physical-GPU lock. Requested/effective history survives restart and manual
+retry.
+
 The current mock path keeps the planned shot duration; it does not yet derive speaking duration from
 measured audio. Conditional lip-sync rules (skip narration, off-camera/hidden mouths, and integrated
 audio-driven motion) remain pipeline design requirements rather than exercised orchestration.

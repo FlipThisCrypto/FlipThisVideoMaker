@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from flipthis_video_maker.api.render_profiles import resolve_render_profile
 from flipthis_video_maker.api.schemas import (
     AssetRead,
     CandidateRating,
@@ -22,6 +23,7 @@ from flipthis_video_maker.api.schemas import (
     VoiceProfilePatch,
     VoiceProfileRead,
 )
+from flipthis_video_maker.config.render_profiles import RENDER_PROFILE_EXECUTION_KEY
 from flipthis_video_maker.config.settings import Settings, get_settings
 from flipthis_video_maker.database.session import get_db
 from flipthis_video_maker.domain.models import (
@@ -276,9 +278,19 @@ def delete_shot(shot_id: str, db: DB) -> None:
 
 
 @router.post("/shots/{shot_id}/regenerate", status_code=202)
-def regenerate_shot(shot_id: str, body: ShotRegenerateRequest, db: DB) -> dict[str, str]:
+def regenerate_shot(
+    shot_id: str,
+    body: ShotRegenerateRequest,
+    db: DB,
+    settings: Config,
+) -> dict[str, str]:
     shot = require(db, Shot, shot_id)
     scene = require(db, Scene, shot.scene_id)
+    project = require(db, Project, scene.project_id)
+    requested_profile = body.render_profile or project.resolution_profile
+    execution = resolve_render_profile(settings, requested_profile)
+    payload = body.model_dump(exclude={"render_profile"}, exclude_none=True)
+    payload[RENDER_PROFILE_EXECUTION_KEY] = execution.model_dump(mode="json")
     job = Job(
         job_type="mock_shot_regeneration",
         project_id=scene.project_id,
@@ -286,7 +298,7 @@ def regenerate_shot(shot_id: str, body: ShotRegenerateRequest, db: DB) -> dict[s
         shot_id=shot.id,
         provider="mock",
         gpu_assignment="cpu",
-        payload=body.model_dump(exclude_none=True),
+        payload=payload,
     )
     db.add(job)
     db.commit()

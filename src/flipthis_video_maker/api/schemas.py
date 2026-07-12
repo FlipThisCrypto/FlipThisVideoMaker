@@ -1,7 +1,12 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasPath, BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from flipthis_video_maker.config.render_profiles import (
+    RENDER_PROFILE_EXECUTION_KEY,
+    RenderProfileExecution,
+)
 
 
 class ORMModel(BaseModel):
@@ -13,19 +18,50 @@ class ProjectCreate(BaseModel):
     description: str = ""
     target_duration: float = Field(default=30, gt=0, le=3600)
     aspect_ratio: str = "16:9"
-    resolution_profile: str = "draft"
+    resolution_profile: str | None = Field(default=None, min_length=1, max_length=40)
     fps: float = Field(default=24, ge=1, le=120)
     global_visual_style: str = ""
     global_negative_prompt: str = ""
 
 
 class ProjectRead(ProjectCreate, ORMModel):
+    resolution_profile: str
     id: str
     status: str
     root_asset_directory: str
     original_story: str
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    target_duration: float | None = Field(default=None, gt=0, le=3600)
+    aspect_ratio: str | None = None
+    resolution_profile: str | None = Field(default=None, min_length=1, max_length=40)
+    fps: float | None = Field(default=None, ge=1, le=120)
+    global_visual_style: str | None = None
+    global_negative_prompt: str | None = None
+
+
+class ProjectRenderRequest(BaseModel):
+    render_profile: str | None = Field(default=None, min_length=1, max_length=40)
+
+
+class RenderProfileRead(BaseModel):
+    name: str
+    width: int
+    height: int
+    fps: int
+    video_codec: str
+    audio_codec: str
+    fallback_profile: str | None
+
+
+class RenderProfileCatalogRead(BaseModel):
+    default_profile: str
+    profiles: list[RenderProfileRead]
 
 
 class CharacterCreate(BaseModel):
@@ -239,6 +275,7 @@ class ShotRegenerateRequest(BaseModel):
     prompt: str | None = None
     negative_prompt: str | None = None
     generation_settings: dict[str, Any] | None = None
+    render_profile: str | None = Field(default=None, min_length=1, max_length=40)
 
 
 class JobRead(ORMModel):
@@ -257,6 +294,35 @@ class JobRead(ORMModel):
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+    render_profile_execution: RenderProfileExecution | None = Field(
+        default=None,
+        validation_alias=AliasPath("payload", RENDER_PROFILE_EXECUTION_KEY),
+    )
+    render_profile_execution_error: str | None = Field(
+        default=None,
+        validation_alias=AliasPath("payload", RENDER_PROFILE_EXECUTION_KEY),
+    )
+
+    @field_validator("render_profile_execution", mode="before")
+    @classmethod
+    def tolerate_invalid_profile_execution(cls, value: object) -> RenderProfileExecution | None:
+        if value is None:
+            return None
+        try:
+            return RenderProfileExecution.model_validate(value)
+        except ValidationError:
+            return None
+
+    @field_validator("render_profile_execution_error", mode="before")
+    @classmethod
+    def report_invalid_profile_execution(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        try:
+            RenderProfileExecution.model_validate(value)
+        except ValidationError:
+            return "invalid_snapshot"
+        return None
 
 
 class WorkerRead(BaseModel):

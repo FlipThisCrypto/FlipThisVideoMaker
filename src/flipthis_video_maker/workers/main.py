@@ -11,6 +11,13 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from flipthis_video_maker.config.render_profiles import (
+    RENDER_PROFILE_EXECUTION_KEY,
+    RenderProfileConfigurationFile,
+    RenderProfileExecution,
+    load_render_profile_configuration,
+    render_profile_execution_from_payload,
+)
 from flipthis_video_maker.config.settings import get_settings
 from flipthis_video_maker.config.workers import load_worker_configuration
 from flipthis_video_maker.database.session import SessionLocal
@@ -19,6 +26,11 @@ from flipthis_video_maker.domain.models import Job, Project
 from flipthis_video_maker.media.ffmpeg import MediaCancelled
 from flipthis_video_maker.pipeline.mock_pipeline import MockPipeline, PipelineCancelled
 from flipthis_video_maker.pipeline.shot_regeneration import MockShotRegenerator
+from flipthis_video_maker.providers.base.errors import (
+    ProviderCleanupResult,
+    ProviderExecutionError,
+    ProviderOutOfMemoryError,
+)
 from flipthis_video_maker.scheduler.gpu import (
     GPULock,
     evaluate_vram_admission,
@@ -48,6 +60,7 @@ async def process_next(
     worker_id: str | None = None,
     worker_instance_id: str | None = None,
     shutdown_requested: Callable[[], bool] | None = None,
+    render_profiles: RenderProfileConfigurationFile | None = None,
 ) -> bool:
     """Admit, atomically claim, and process at most one exact-queue job."""
     lock = GPULock(str(physical_gpu)) if physical_gpu is not None else nullcontext()
@@ -90,6 +103,7 @@ async def process_next(
                 assignment,
                 assigned_gpu_metrics,
                 shutdown_requested,
+                render_profiles,
             )
         finally:
             if worker_status is not None:
@@ -103,12 +117,19 @@ async def _process_claimed_job(
     assignment: str,
     assigned_gpu_metrics: dict[str, object] | None,
     shutdown_requested: Callable[[], bool] | None,
+    render_profiles: RenderProfileConfigurationFile | None,
 ) -> None:
     log_path: Path | None = None
     try:
         project = db.get(Project, job.project_id)
         if project is None:
             raise RuntimeError(f"Job project is missing: {job.project_id}")
+        profile_execution = _resolve_render_profile_execution(
+            db,
+            job,
+            project,
+            render_profiles,
+        )
         log_path = (
             Path(project.root_asset_directory)
             / "logs"
@@ -124,6 +145,8 @@ async def _process_claimed_job(
             device=assignment,
             attempt=job.attempt_number,
             gpu_metrics=assigned_gpu_metrics,
+            requested_render_profile=profile_execution.requested_profile,
+            effective_render_profile=profile_execution.effective_profile,
         )
         job.current_stage = "rendering"
         db.commit()
@@ -145,10 +168,48 @@ async def _process_claimed_job(
             db.commit()
             append_job_log(log_path, "progress", progress=value, stage=stage)
 
-        if job.job_type == "mock_project_render":
-            render = await MockPipeline(db, cancellation_requested, report_progress).run(
-                job.project_id
+        def persist_profile_fallback(
+            advanced: RenderProfileExecution,
+            _error: ProviderOutOfMemoryError,
+            _cleanup: ProviderCleanupResult,
+        ) -> None:
+            job.payload = {
+                **(job.payload or {}),
+                RENDER_PROFILE_EXECUTION_KEY: advanced.model_dump(mode="json"),
+            }
+            db.commit()
+            record = advanced.fallback_history[-1]
+            _append_job_log_safely(
+                log_path,
+                "render_profile_fallback",
+                **record.model_dump(mode="json"),
             )
+
+        def record_provider_cleanup(
+            error: ProviderOutOfMemoryError,
+            cleanup: ProviderCleanupResult,
+        ) -> None:
+            _append_job_log_safely(log_path, "provider_oom", **error.to_safe_dict())
+            _append_job_log_safely(
+                log_path,
+                "provider_cleanup",
+                provider_id=cleanup.provider_id,
+                completed=cleanup.completed,
+                retry_safe=cleanup.retry_safe,
+                action_code=cleanup.action_code,
+            )
+
+        if job.job_type == "mock_project_render":
+            render = await MockPipeline(
+                db,
+                cancellation_requested,
+                report_progress,
+                render_profile_execution=profile_execution,
+                job_attempt=job.attempt_number,
+                gpu_assignment=assignment,
+                profile_fallback=persist_profile_fallback,
+                provider_cleanup=record_provider_cleanup,
+            ).run(job.project_id)
             output_asset_id = render.creation_metadata.get("output_asset_id")
             if not isinstance(output_asset_id, str):
                 raise RuntimeError("Render completed without a final output asset")
@@ -158,7 +219,16 @@ async def _process_claimed_job(
             prompt = job.payload.get("prompt")
             negative_prompt = job.payload.get("negative_prompt")
             settings = job.payload.get("generation_settings")
-            candidate = await MockShotRegenerator(db, cancellation_requested, report_progress).run(
+            candidate = await MockShotRegenerator(
+                db,
+                cancellation_requested,
+                report_progress,
+                render_profile_execution=profile_execution,
+                job_attempt=job.attempt_number,
+                gpu_assignment=assignment,
+                profile_fallback=persist_profile_fallback,
+                provider_cleanup=record_provider_cleanup,
+            ).run(
                 job.shot_id,
                 same_seed=bool(job.payload.get("same_seed", True)),
                 prompt=prompt if isinstance(prompt, str) else None,
@@ -199,6 +269,8 @@ async def _process_claimed_job(
             "message": str(error),
             "gpu_metrics": [assigned_gpu_metrics] if assigned_gpu_metrics is not None else [],
         }
+        if isinstance(error, ProviderExecutionError):
+            error_info["provider_error"] = error.to_safe_dict()
         state = mark_failed(db, job, error_info)
         if state is JobState.CANCEL_REQUESTED:
             state = mark_cancelled(db, job)
@@ -241,6 +313,28 @@ def _append_job_log_safely(log_path: Path | None, event: str, **data: Any) -> No
         )
 
 
+def _resolve_render_profile_execution(
+    db: Session,
+    job: Job,
+    project: Project,
+    render_profiles: RenderProfileConfigurationFile | None,
+) -> RenderProfileExecution:
+    payload = job.payload or {}
+    if RENDER_PROFILE_EXECUTION_KEY in payload:
+        return render_profile_execution_from_payload(payload)
+
+    profiles = render_profiles or load_render_profile_configuration(
+        get_settings().render_profile_config
+    )
+    execution = RenderProfileExecution.resolve(profiles, project.resolution_profile)
+    job.payload = {
+        **payload,
+        RENDER_PROFILE_EXECUTION_KEY: execution.model_dump(mode="json"),
+    }
+    db.commit()
+    return execution
+
+
 async def loop(device: str, poll_seconds: float = 1, *, once: bool = False) -> None:
     stopped = False
 
@@ -252,6 +346,7 @@ async def loop(device: str, poll_seconds: float = 1, *, once: bool = False) -> N
     signal.signal(signal.SIGINT, stop)
     settings = get_settings()
     configuration = load_worker_configuration(settings.worker_config).require(device)
+    render_profiles = load_render_profile_configuration(settings.render_profile_config)
     if configuration.physical_gpu is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(configuration.physical_gpu)
     reporter = WorkerHeartbeatReporter(
@@ -274,6 +369,7 @@ async def loop(device: str, poll_seconds: float = 1, *, once: bool = False) -> N
                     worker_id=reporter.worker_id,
                     worker_instance_id=reporter.instance_id,
                     shutdown_requested=lambda: stopped,
+                    render_profiles=render_profiles,
                 )
             if once:
                 return

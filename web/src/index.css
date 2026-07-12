@@ -12,7 +12,8 @@ select {
 }
 button:focus-visible,
 input:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+select:focus-visible {
   @apply outline outline-2 outline-accent;
 }
 .card {

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { RenderProfileExecutionSummary } from "../components/RenderProfileExecutionSummary";
 import type { Job } from "../types";
 export function Jobs() {
   const client = useQueryClient();
@@ -33,6 +34,17 @@ export function Jobs() {
               {job.current_stage} · {job.gpu_assignment} · attempt{" "}
               {job.attempt_number}
             </p>
+            {job.render_profile_execution && (
+              <RenderProfileExecutionSummary
+                execution={job.render_profile_execution}
+              />
+            )}
+            {job.render_profile_execution_error && (
+              <p className="mt-2 text-sm text-red-300" role="alert">
+                This job has an invalid render-profile snapshot and cannot run
+                until it is replaced or repaired.
+              </p>
+            )}
             <div className="mt-3 flex gap-2">
               {job.log_path && (
                 <a className="button" href={`/api/v1/jobs/${job.id}/log`}>

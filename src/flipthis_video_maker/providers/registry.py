@@ -1,9 +1,9 @@
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from flipthis_video_maker.providers.base.models import ProviderInfo
 from flipthis_video_maker.providers.base.protocols import Provider, StoryPlanner
@@ -32,10 +32,19 @@ class ProviderConfiguration(BaseModel):
     submit_path: str | None = None
     workflow_template_directory: Path | None = None
     command: list[str] = Field(default_factory=list)
+    oom_exit_codes: set[int] = Field(default_factory=set)
     python: Path | None = None
     script: Path | None = None
     model: str | None = None
     api_key_env: str | None = None
+
+    @model_validator(mode="after")
+    def validate_oom_exit_codes(self) -> Self:
+        if 0 in self.oom_exit_codes:
+            raise ValueError("OOM exit codes cannot include successful exit code 0")
+        if self.oom_exit_codes and self.kind != "cli":
+            raise ValueError("OOM exit codes are supported only by CLI providers")
+        return self
 
 
 class ProviderConfigurationFile(BaseModel):
