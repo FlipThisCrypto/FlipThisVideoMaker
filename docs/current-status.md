@@ -7,6 +7,20 @@ advanced media QA, browser workflow, cancellation, heartbeat, and GPU-admission 
 are exercised. Live model production remains incomplete and unexercised. This file is the durable
 handoff point; resume from the final sections rather than relying on chat history.
 
+## Durable stopping point
+
+The next final-media phase has been reconnoitred but intentionally not started. No partial API,
+worker, pipeline, or frontend contract exists at this checkpoint. ADR 0009 records the accepted
+cross-layer design for a versioned finalization execution snapshot, server-verified background-music
+Assets, immutable assembly/audio/subtitle stages, and the required test matrix.
+
+Resume by implementing `config/render_finalization.py` and its contract tests first. Then extend the
+existing `ProjectRenderRequest` and render Job payload, worker parser, `MockPipeline` final assembly,
+and `ProjectEditor` render form in that order. Do not create a parallel settings system or accept
+client filesystem paths. Preserve the current sidecar/no-normalization/no-music behavior until the
+new non-default modes have focused integration coverage, then run the full validation matrix before
+the next phase commit.
+
 ## Exercised milestone
 
 The local workflow now supports:
@@ -201,7 +215,8 @@ settings editing, manual shot start/end-frame replacement, and richer render/fin
 ## Next execution order
 
 1. Wire the tested finalization utilities into immutable render stages and expose subtitle mode,
-   loudness normalization, and optional music/ducking through versioned render-job inputs and the UI.
+   loudness normalization, and optional music/ducking through the versioned render-job contract in
+   ADR 0009 and the existing UI.
 2. Implement audio-measured speaking-shot duration, multi-candidate render generation, and manual
    planned start/end-frame upload or replacement without rebuilding completed work.
 3. Finish administrator provider/settings controls and successful-command fixtures for generic CLI
