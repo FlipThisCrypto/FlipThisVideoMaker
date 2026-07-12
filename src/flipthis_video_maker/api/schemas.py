@@ -259,6 +259,23 @@ class JobRead(ORMModel):
     completed_at: datetime | None
 
 
+class WorkerRead(BaseModel):
+    id: str
+    assignment: str
+    configured: bool
+    configured_max_concurrent_jobs: int | None
+    physical_gpu: int | None
+    runtime_state: str | None
+    online: bool
+    instance_id: str | None
+    hostname: str | None
+    pid: int | None
+    current_job_id: str | None
+    started_at: datetime | None
+    last_heartbeat_at: datetime | None
+    stopped_at: datetime | None
+
+
 class RenderRead(ORMModel):
     id: str
     project_id: str

@@ -6,7 +6,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from flipthis_video_maker.database.session import Base
-from flipthis_video_maker.domain.enums import JobState, ProjectStatus, ShotStatus
+from flipthis_video_maker.domain.enums import JobState, ProjectStatus, ShotStatus, WorkerState
 
 
 def uid() -> str:
@@ -211,6 +211,22 @@ class Job(Base, TimestampMixin):
     input_asset_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     output_asset_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class Worker(Base, TimestampMixin):
+    __tablename__ = "workers"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    instance_id: Mapped[str] = mapped_column(String(36), unique=True)
+    assignment: Mapped[str] = mapped_column(String(20), index=True)
+    state: Mapped[str] = mapped_column(String(20), default=WorkerState.STARTING.value)
+    hostname: Mapped[str] = mapped_column(String(255))
+    pid: Mapped[int] = mapped_column(Integer)
+    current_job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now, index=True
+    )
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Render(Base, TimestampMixin):

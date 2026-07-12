@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -9,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from flipthis_video_maker.config.settings import Settings, get_settings
 from flipthis_video_maker.database.session import get_db
-from flipthis_video_maker.domain.enums import JobState
+from flipthis_video_maker.domain.enums import JobState, WorkerState
 from flipthis_video_maker.domain.models import Candidate, Job
 from flipthis_video_maker.main import create_app
+from flipthis_video_maker.services.workers import register_worker, update_worker_status
 
 
 @pytest.mark.asyncio
@@ -46,6 +48,67 @@ async def test_api_starts_on_migrated_schema_and_persists_project(
         project_id = response.json()["id"]
         persisted = await client.get(f"/api/v1/projects/{project_id}")
         assert persisted.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_worker_status_merges_configuration_with_persisted_liveness(
+    db: Session, tmp_path: Path
+) -> None:
+    app = create_app()
+    now = datetime.now(UTC)
+    cpu = register_worker(
+        db,
+        "cpu",
+        "cpu",
+        instance_id="cpu-generation",
+        registered_at=now,
+    )
+    assert update_worker_status(
+        db,
+        cpu.id,
+        cpu.instance_id,
+        state=WorkerState.IDLE,
+        current_job_id=None,
+        heartbeat_at=now,
+    )
+    stale = register_worker(
+        db,
+        "gpu0",
+        "gpu0",
+        instance_id="stale-generation",
+        registered_at=now - timedelta(minutes=5),
+    )
+    assert update_worker_status(
+        db,
+        stale.id,
+        stale.instance_id,
+        state=WorkerState.IDLE,
+        current_job_id=None,
+        heartbeat_at=now - timedelta(minutes=5),
+    )
+    register_worker(db, "orphan", "cpu", instance_id="orphan-generation")
+
+    def database_override() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = database_override
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        data_dir=tmp_path / "projects",
+        worker_stale_seconds=20,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/v1/workers")
+
+    assert response.status_code == 200
+    workers = {item["id"]: item for item in response.json()}
+    assert workers["cpu"]["online"] is True
+    assert workers["cpu"]["runtime_state"] == WorkerState.IDLE.value
+    assert workers["gpu0"]["online"] is False
+    assert workers["gpu0"]["runtime_state"] == WorkerState.IDLE.value
+    assert workers["gpu1"]["runtime_state"] is None
+    assert workers["gpu1"]["configured"] is True
+    assert workers["orphan"]["configured"] is False
 
 
 @pytest.mark.asyncio

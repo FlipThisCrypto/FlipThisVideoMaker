@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -5,13 +6,19 @@ from flipthis_video_maker.media.ffmpeg import probe
 
 
 def analyze_video(
-    path: Path, expected_duration: float, width: int, height: int, audio_expected: bool
+    path: Path,
+    expected_duration: float,
+    width: int,
+    height: int,
+    audio_expected: bool,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"exists": path.is_file(), "checks": {}}
     if not path.is_file():
         result["passed"] = False
         return result
-    data = probe(path)
+    data = probe(path, cancel_requested=cancel_requested)
     streams = data.get("streams", [])
     video = next((item for item in streams if item.get("codec_type") == "video"), None)
     audio = next((item for item in streams if item.get("codec_type") == "audio"), None)

@@ -39,3 +39,11 @@ class JobState(StrEnum):
     FAILED = "failed"
     CANCEL_REQUESTED = "cancel_requested"
     CANCELLED = "cancelled"
+
+
+class WorkerState(StrEnum):
+    STARTING = "starting"
+    IDLE = "idle"
+    BUSY = "busy"
+    STOPPING = "stopping"
+    STOPPED = "stopped"

@@ -16,9 +16,12 @@ responses are validated before domain data is persisted.
   future transport. See [WanGP CLI](https://github.com/deepbeepmeep/Wan2GP/blob/main/docs/CLI.md)
   and [WanGP API/MCP](https://github.com/deepbeepmeep/Wan2GP/blob/main/docs/API.md).
 
-These adapters are protocol-tested, but no live model backend has been exercised in this workspace.
-Enable one only after setting its endpoint/model or WanGP Python/script paths. API keys are read from
-the configured environment variable name and are never returned by discovery.
+Ollama and OpenAI-compatible planner contracts have automated protocol tests. ComfyUI route methods,
+WanGP process execution, and generic CLI execution are implemented but do not yet have complete
+protocol-behavior tests; WanGP tests currently cover argv/input validation only. No live model backend
+has been exercised in this workspace. Enable one only after adding protocol fixtures and setting its
+endpoint/model or WanGP Python/script paths. API keys are read from the configured environment
+variable name and are never returned by discovery.
 The API reports capability, inputs, model identity, availability, limits, and notes without importing
 model dependencies into the core.
 
@@ -33,10 +36,11 @@ model dependencies into the core.
 
 - ComfyUI health, prompt submission, history, and interrupt calls using administrator-owned workflow
   templates.
-- WanGP headless process submission, timeout cancellation, and output collection.
+- WanGP headless process code for submission, timeout cancellation, and output collection; execution
+  behavior is not yet fixture-tested.
 - Ollama and OpenAI-compatible structured planning.
-- Generic CLI image, TTS, and video execution using administrator-defined argument arrays without a
-  shell.
+- Generic CLI image, TTS, and video execution code using administrator-defined argument arrays without
+  a shell; protocol fixtures are still missing.
 
 ## Planned
 

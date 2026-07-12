@@ -6,8 +6,9 @@ dialogue WAV, planned keyframes, candidate video, true boundary-frame extraction
 QA, and final FFmpeg assembly. Each stage records Assets with checksums and provenance. New attempts
 use a unique run directory and never overwrite successful output.
 
-Speaking-shot duration is derived from measured audio plus padding. Lip sync is skipped for narration,
-off-camera speakers, hidden mouths, and providers that already produce audio-driven facial motion.
-External provider work is admitted by capability, not provider name. A failed Job retains completed
-Assets; retry creates a new attempt. Per-shot regeneration creates an unselected Candidate until the
-user promotes it.
+The current mock path keeps the planned shot duration; it does not yet derive speaking duration from
+measured audio. Conditional lip-sync rules (skip narration, off-camera/hidden mouths, and integrated
+audio-driven motion) remain pipeline design requirements rather than exercised orchestration.
+External provider work is intended to be admitted by capability, not provider name. A failed Job
+retains completed Assets; retry creates a new attempt. Per-shot regeneration creates an unselected
+Candidate until the user promotes it.

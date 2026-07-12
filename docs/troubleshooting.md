@@ -7,8 +7,20 @@ Run `uv run alembic upgrade head`, confirm `FTVM_DATABASE_URL`, and request
 
 ## Worker does not claim a job
 
-Worker assignment must exactly match `Job.gpu_assignment`: `cpu`, `gpu0`, or `gpu1`. GPU workers do
-not steal CPU work. Inspect `/api/v1/jobs` for state and assignment.
+Worker assignment must exactly match `Job.gpu_assignment`. Logical worker IDs, assignments, and
+physical GPU mappings come from `config/workers.yaml`; GPU workers do not steal CPU work. Inspect
+`/api/v1/workers` for configured/runtime state and `/api/v1/jobs` for queue assignment.
+
+A GPU worker locks its configured physical device and then checks `FTVM_MIN_FREE_VRAM_MB`. A missing
+or failed `nvidia-smi` probe, a missing physical index, or insufficient free VRAM fails closed: the job
+remains queued and its attempt count does not increase.
+
+## Worker is stale after a crash
+
+The API derives online status from `last_heartbeat_at` and `FTVM_WORKER_STALE_SECONDS`. A stale row is
+not proof that an external provider process stopped, so the application does not automatically
+requeue its current job. Inspect the worker/provider process and job log, stop any orphan process,
+then use the explicit retry action when safe.
 
 ## FFmpeg render fails
 
@@ -24,4 +36,5 @@ proxy errors during an intentional API restart.
 ## No GPU is reported
 
 GPU discovery returns an empty list when `nvidia-smi` is absent or fails. The mock milestone is fully
-CPU-only. A configured GPU worker can start without proving CUDA/model execution.
+CPU-only. A configured GPU worker can start for lifecycle diagnostics, but it will not claim GPU jobs
+until its exact physical device passes admission. This does not prove CUDA or model execution.

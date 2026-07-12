@@ -55,6 +55,22 @@ export interface Job {
   started_at: string | null;
   completed_at: string | null;
 }
+export interface WorkerStatus {
+  id: string;
+  assignment: string;
+  configured: boolean;
+  configured_max_concurrent_jobs: number | null;
+  physical_gpu: number | null;
+  runtime_state: string | null;
+  online: boolean;
+  instance_id: string | null;
+  hostname: string | null;
+  pid: number | null;
+  current_job_id: string | null;
+  started_at: string | null;
+  last_heartbeat_at: string | null;
+  stopped_at: string | null;
+}
 export interface Render {
   id: string;
   project_id: string;

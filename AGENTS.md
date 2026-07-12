@@ -12,7 +12,9 @@ Before changing code, read:
 2. The original user specification in the preceding Codex conversation, if available.
 3. Once created, the architecture and ADR documents under `docs/`.
 
-Do not assume existing code works merely because it imports or compiles. The Python source has only received a syntax-only `compileall` check.
+Do not assume existing code works merely because it imports or compiles. Treat only the checks and
+runtime probes recorded in `docs/current-status.md` as exercised evidence, and rerun relevant checks
+after every change.
 
 ## Architecture Boundaries
 
@@ -89,12 +91,16 @@ Also validate API startup, one CPU worker, two separately configured GPU workers
 - No generated data or secrets are staged.
 - Documentation accurately distinguishes tested, mocked, configured, and planned behavior.
 - Commit a coherent, working boundary; do not commit a knowingly broken intermediate state.
+- At the end of each implementation phase, update `docs/current-status.md`, record durable decisions
+  in ADRs, and commit the validated phase so another session can resume without chat history.
 
 ## Current Status
 
-This is an unvalidated partial implementation, not a finished application. See `docs/current-status.md` for the inventory, risks, and recommended next steps. The repository is not yet a Git repository as of 2026-07-12.
+This is a validated but incomplete local application, not a finished production system. See
+`docs/current-status.md` for the exact exercised inventory, remaining risks, and next execution
+order. The workspace is a Git repository on `main`, with the GitHub repository configured as
+`origin`; inspect local and remote status before publishing.
 
 ## Decisions
 
 Record architectural decisions in `docs/adr/NNNN-short-title.md`. Each ADR should state context, decision, alternatives, consequences, and status. Never bury a durable architecture choice only in chat history.
-

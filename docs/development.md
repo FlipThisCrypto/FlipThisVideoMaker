@@ -10,5 +10,7 @@ Generated data belongs under `FTVM_DATA_DIR` and is excluded from version contro
 `Base.metadata.create_all()` only for isolated fixtures. Production-like paths and smoke runs use
 Alembic.
 
-Before a commit, run every command in `AGENTS.md`. Add a smoke probe for every new feature and every
-escaped regression. Preserve the nested `skills` repository and `skills.7z` as user-owned material.
+Before a commit, run every command in `AGENTS.md`. Add a focused regression test for each escaped
+failure and rerun the smoke pipeline for media/worker changes. At every coherent phase boundary,
+update `docs/current-status.md` and relevant ADRs before committing. Preserve the nested `skills`
+repository and `skills.7z` as user-owned material.

@@ -20,8 +20,10 @@ from flipthis_video_maker.api.schemas import (
     ShotRead,
     VoiceProfileCreate,
     VoiceProfileRead,
+    WorkerRead,
 )
 from flipthis_video_maker.config.settings import Settings, get_settings
+from flipthis_video_maker.config.workers import load_worker_configuration
 from flipthis_video_maker.database.session import get_db
 from flipthis_video_maker.domain.enums import JobState, ShotStatus
 from flipthis_video_maker.domain.models import (
@@ -34,6 +36,7 @@ from flipthis_video_maker.domain.models import (
     Scene,
     Shot,
     VoiceProfile,
+    Worker,
 )
 from flipthis_video_maker.media.ffmpeg import checksum
 from flipthis_video_maker.providers.planning.deterministic import DeterministicStoryPlanner
@@ -45,6 +48,7 @@ from flipthis_video_maker.providers.registry import (
 from flipthis_video_maker.scheduler.gpu import discover_gpus
 from flipthis_video_maker.services.jobs import request_cancellation, retry
 from flipthis_video_maker.services.planning import apply_story_plan
+from flipthis_video_maker.services.workers import list_workers, worker_is_online
 from flipthis_video_maker.storage.uploads import UploadValidationError, store_validated_upload
 
 router = APIRouter(prefix="/api/v1")
@@ -343,13 +347,63 @@ def gpus() -> list[dict[str, Any]]:
     return discover_gpus()
 
 
-@router.get("/workers")
-def workers() -> list[dict[str, Any]]:
-    return [
-        {"id": "cpu", "configured": True},
-        {"id": "gpu0", "configured": True},
-        {"id": "gpu1", "configured": True},
+@router.get("/workers", response_model=list[WorkerRead])
+def workers(db: DB, settings: Config) -> list[dict[str, object]]:
+    configured = load_worker_configuration(settings.worker_config).workers
+    persisted = {worker.id: worker for worker in list_workers(db)}
+    records = [
+        _worker_record(
+            worker_id=item.id,
+            assignment=item.assignment,
+            configured=True,
+            configured_max_concurrent_jobs=item.max_concurrent_jobs,
+            physical_gpu=item.physical_gpu,
+            runtime=persisted.pop(item.id, None),
+            stale_seconds=settings.worker_stale_seconds,
+        )
+        for item in configured
     ]
+    records.extend(
+        _worker_record(
+            worker_id=runtime.id,
+            assignment=runtime.assignment,
+            configured=False,
+            configured_max_concurrent_jobs=None,
+            physical_gpu=None,
+            runtime=runtime,
+            stale_seconds=settings.worker_stale_seconds,
+        )
+        for runtime in persisted.values()
+    )
+    return records
+
+
+def _worker_record(
+    *,
+    worker_id: str,
+    assignment: str,
+    configured: bool,
+    configured_max_concurrent_jobs: int | None,
+    physical_gpu: int | None,
+    runtime: Worker | None,
+    stale_seconds: float,
+) -> dict[str, object]:
+    return {
+        "id": worker_id,
+        "assignment": assignment,
+        "configured": configured,
+        "configured_max_concurrent_jobs": configured_max_concurrent_jobs,
+        "physical_gpu": physical_gpu,
+        "runtime_state": runtime.state if runtime else None,
+        "online": worker_is_online(runtime, stale_seconds) if runtime else False,
+        "instance_id": runtime.instance_id if runtime else None,
+        "hostname": runtime.hostname if runtime else None,
+        "pid": runtime.pid if runtime else None,
+        "current_job_id": runtime.current_job_id if runtime else None,
+        "started_at": runtime.started_at if runtime else None,
+        "last_heartbeat_at": runtime.last_heartbeat_at if runtime else None,
+        "stopped_at": runtime.stopped_at if runtime else None,
+    }
 
 
 @router.get("/renders/{render_id}")

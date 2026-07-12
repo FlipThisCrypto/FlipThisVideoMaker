@@ -30,7 +30,7 @@ class MockShotRegenerator:
         self.progress = progress
         self.images = MockImageProvider()
         self.tts = MockTTSProvider()
-        self.video = MockVideoProvider()
+        self.video = MockVideoProvider(cancel_requested)
 
     async def run(
         self,
@@ -134,11 +134,14 @@ class MockShotRegenerator:
                 path=audio_path,
                 provider="mock-tts",
                 model="mock-tone-v1",
+                cancel_requested=self.cancel_requested,
             )
             input_assets.append(audio_asset.id)
 
         self._check_cancelled()
         self._report_progress(0.45, "generating shot candidate")
+        # Persist prepared inputs and release SQLite's writer lock before provider execution.
+        self.db.commit()
         output = root / "candidates" / f"candidate-{candidate_seed}.mp4"
         started = time.monotonic()
         await self.video.generate(
@@ -156,6 +159,23 @@ class MockShotRegenerator:
         )
         self._check_cancelled()
         self._report_progress(0.75, "extracting candidate frames")
+        actual_start_path = root / "frames" / f"actual-start-{candidate_seed}.png"
+        actual_end_path = root / "frames" / f"actual-end-{candidate_seed}.png"
+        extract_frame(output, actual_start_path, cancel_requested=self.cancel_requested)
+        extract_frame(
+            output,
+            actual_end_path,
+            last=True,
+            cancel_requested=self.cancel_requested,
+        )
+        qa = analyze_video(
+            output,
+            shot.duration,
+            854,
+            480,
+            audio_expected=True,
+            cancel_requested=self.cancel_requested,
+        )
         video_asset = register_asset(
             self.db,
             project_id=project.id,
@@ -167,11 +187,8 @@ class MockShotRegenerator:
             prompt=candidate_prompt,
             seed=candidate_seed,
             parents=input_assets,
+            cancel_requested=self.cancel_requested,
         )
-        actual_start_path = root / "frames" / f"actual-start-{candidate_seed}.png"
-        actual_end_path = root / "frames" / f"actual-end-{candidate_seed}.png"
-        extract_frame(output, actual_start_path)
-        extract_frame(output, actual_end_path, last=True)
         actual_start = register_asset(
             self.db,
             project_id=project.id,
@@ -188,7 +205,6 @@ class MockShotRegenerator:
             path=actual_end_path,
             parents=[video_asset.id],
         )
-        qa = analyze_video(output, shot.duration, 854, 480, audio_expected=True)
         candidate = Candidate(
             shot_id=shot.id,
             provider="mock-video",
@@ -208,6 +224,7 @@ class MockShotRegenerator:
         )
         shot.retry_count += 1
         self.db.add(candidate)
+        self._check_cancelled()
         self.db.commit()
         self._report_progress(0.98, "validated shot candidate")
         return candidate

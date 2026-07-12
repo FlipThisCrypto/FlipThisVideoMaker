@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
     provider_config: Path = Path("config/providers.yaml")
+    worker_config: Path = Path("config/workers.yaml")
+    worker_heartbeat_seconds: float = Field(default=5, gt=0)
+    worker_stale_seconds: float = Field(default=20, gt=0)
     bind_host: str = "127.0.0.1"
     bind_port: int = 8000
     max_upload_mb: int = 100
@@ -25,9 +28,7 @@ class Settings(BaseSettings):
     auth_mode: Literal["local", "token"] = "local"
     log_level: str = "INFO"
     watermark_enabled: bool = False
-    gpu_video: int = 0
-    gpu_secondary: int = 1
-    min_free_vram_mb: int = 2000
+    min_free_vram_mb: int = Field(default=2000, ge=0)
     hf_token_file: Path | None = Field(default=None, repr=False)
 
     def ensure_directories(self) -> None:

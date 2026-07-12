@@ -51,7 +51,7 @@ class MockPipeline:
         self.progress = progress
         self.images = MockImageProvider()
         self.tts = MockTTSProvider()
-        self.video = MockVideoProvider()
+        self.video = MockVideoProvider(cancel_requested)
 
     async def run(self, project_id: str) -> Render:
         project = self.db.get(Project, project_id)
@@ -151,6 +151,7 @@ class MockPipeline:
                         path=audio_path,
                         provider="mock-tts",
                         model="mock-tone-v1",
+                        cancel_requested=self.cancel_requested,
                     )
                     if not rerun:
                         self._transition(shot, ShotStatus.AUDIO_READY)
@@ -160,37 +161,69 @@ class MockPipeline:
                     self._transition(shot, ShotStatus.KEYFRAMES_READY)
                     self._transition(shot, ShotStatus.VIDEO_PENDING)
                 self._transition(shot, ShotStatus.VIDEO_GENERATING)
+                # Release SQLite's writer lock before the long-running provider process so
+                # the API can persist a cancellation request from another connection.
+                self.db.commit()
 
                 output = shot_root / "candidates" / f"candidate-{shot.seed}.mp4"
                 started = time.monotonic()
-                await self.video.generate(
-                    VideoRequest(
-                        prompt=shot.prompt,
-                        output_path=output,
-                        start_frame=planned_start_path,
-                        end_frame=planned_end_path,
-                        duration=shot.duration,
-                        fps=24,
-                        audio_path=audio_path,
-                        seed=shot.seed,
+                try:
+                    await self.video.generate(
+                        VideoRequest(
+                            prompt=shot.prompt,
+                            output_path=output,
+                            start_frame=planned_start_path,
+                            end_frame=planned_end_path,
+                            duration=shot.duration,
+                            fps=24,
+                            audio_path=audio_path,
+                            seed=shot.seed,
+                        )
                     )
-                )
-                self._check_cancelled()
-                video_asset = register_asset(
-                    self.db,
-                    project_id=project.id,
-                    shot_id=shot.id,
-                    kind="video_candidate",
-                    path=output,
-                    provider="mock-video",
-                    model="ffmpeg-xfade-v1",
-                    prompt=shot.prompt,
-                    seed=shot.seed,
-                )
-                actual_start_path = shot_root / "frames" / f"actual-start-{shot.seed}.png"
-                actual_end_path = shot_root / "frames" / f"actual-end-{shot.seed}.png"
-                extract_frame(output, actual_start_path)
-                extract_frame(output, actual_end_path, last=True)
+                    self._check_cancelled()
+                    actual_start_path = shot_root / "frames" / f"actual-start-{shot.seed}.png"
+                    actual_end_path = shot_root / "frames" / f"actual-end-{shot.seed}.png"
+                    extract_frame(
+                        output,
+                        actual_start_path,
+                        cancel_requested=self.cancel_requested,
+                    )
+                    extract_frame(
+                        output,
+                        actual_end_path,
+                        last=True,
+                        cancel_requested=self.cancel_requested,
+                    )
+                    qa = analyze_video(
+                        output,
+                        shot.duration,
+                        854,
+                        480,
+                        audio_expected=True,
+                        cancel_requested=self.cancel_requested,
+                    )
+                    video_asset = register_asset(
+                        self.db,
+                        project_id=project.id,
+                        shot_id=shot.id,
+                        kind="video_candidate",
+                        path=output,
+                        provider="mock-video",
+                        model="ffmpeg-xfade-v1",
+                        prompt=shot.prompt,
+                        seed=shot.seed,
+                        cancel_requested=self.cancel_requested,
+                    )
+                except Exception:
+                    self.db.rollback()
+                    failed_shot = self.db.get(Shot, shot.id)
+                    if (
+                        failed_shot is not None
+                        and failed_shot.status == ShotStatus.VIDEO_GENERATING.value
+                    ):
+                        self._transition(failed_shot, ShotStatus.FAILED)
+                        self.db.commit()
+                    raise
                 actual_start = register_asset(
                     self.db,
                     project_id=project.id,
@@ -207,7 +240,6 @@ class MockPipeline:
                     path=actual_end_path,
                     parents=[video_asset.id],
                 )
-                qa = analyze_video(output, shot.duration, 854, 480, audio_expected=True)
                 for old_candidate in shot.candidates:
                     if old_candidate.disposition == "selected":
                         old_candidate.disposition = "superseded"
@@ -278,11 +310,20 @@ class MockPipeline:
         self._report_progress(0.8, "assembling final media")
         render_dir = root / "renders" / run_id
         final_path, applied_transitions = assemble_with_transitions(
-            clips, transitions, render_dir / "final.mp4", fps=24
+            clips,
+            transitions,
+            render_dir / "final.mp4",
+            fps=24,
+            cancel_requested=self.cancel_requested,
         )
         subtitle_path = write_subtitles(subtitles, render_dir / "final.srt")
-        thumb_path = thumbnail(final_path, render_dir / "thumbnail.jpg")
+        thumb_path = thumbnail(
+            final_path,
+            render_dir / "thumbnail.jpg",
+            cancel_requested=self.cancel_requested,
+        )
         contact_path = contact_sheet(actual_ends, render_dir / "contact-sheet.jpg")
+        self._check_cancelled()
         manifest_path = root / "manifests" / f"{run_id}.json"
         manifest = {
             "version": 1,
@@ -324,6 +365,7 @@ class MockPipeline:
                 for candidate in shot.candidates
                 if candidate.id == shot.selected_candidate_id and candidate.output_asset_id
             ],
+            cancel_requested=self.cancel_requested,
         )
         render = Render(
             project_id=project.id,
@@ -347,6 +389,7 @@ class MockPipeline:
         )
         project.status = ProjectStatus.COMPLETE.value
         self.db.add(render)
+        self._check_cancelled()
         self.db.commit()
         self._report_progress(0.98, "validated final media")
         return render

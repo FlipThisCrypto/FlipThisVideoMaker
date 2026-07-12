@@ -4,6 +4,7 @@ import shutil
 import struct
 import uuid
 import wave
+from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -97,6 +98,9 @@ class MockTTSProvider:
 
 
 class MockVideoProvider:
+    def __init__(self, cancel_requested: Callable[[], bool] | None = None) -> None:
+        self.cancel_requested = cancel_requested
+
     def info(self) -> ProviderInfo:
         return ProviderInfo(
             id="mock-video",
@@ -169,7 +173,7 @@ class MockVideoProvider:
             "2",
             str(temporary),
         ]
-        await asyncio.to_thread(run, args)
+        await asyncio.to_thread(run, args, cancel_requested=self.cancel_requested)
         temporary.replace(request.output_path)
         return request.output_path
 

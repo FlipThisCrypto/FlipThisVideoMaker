@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,13 @@ def register_asset(
     prompt: str = "",
     seed: int | None = None,
     parents: list[str] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> Asset:
-    info = probe(path) if path.suffix.lower() in {".mp4", ".wav", ".mkv", ".mov"} else {}
+    info = (
+        probe(path, cancel_requested=cancel_requested)
+        if path.suffix.lower() in {".mp4", ".wav", ".mkv", ".mov"}
+        else {}
+    )
     video: dict[str, Any] = next(
         (s for s in info.get("streams", []) if s.get("codec_type") == "video"), {}
     )

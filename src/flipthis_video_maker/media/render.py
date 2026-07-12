@@ -1,5 +1,6 @@
 import json
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from flipthis_video_maker.config.settings import get_settings
@@ -25,7 +26,12 @@ def write_subtitles(entries: list[tuple[float, float, str]], output: Path) -> Pa
     return output
 
 
-def concatenate(clips: list[Path], output: Path) -> Path:
+def concatenate(
+    clips: list[Path],
+    output: Path,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     listing = output.with_suffix(".concat.txt")
     listing.write_text("".join(f"file '{clip.resolve()}'\n" for clip in clips), encoding="utf-8")
@@ -46,7 +52,8 @@ def concatenate(clips: list[Path], output: Path) -> Path:
             "-movflags",
             "+faststart",
             str(output),
-        ]
+        ],
+        cancel_requested=cancel_requested,
     )
     return output
 
@@ -57,6 +64,7 @@ def assemble_with_transitions(
     output: Path,
     *,
     fps: int,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> tuple[Path, list[dict[str, float | int | str]]]:
     """Assemble normalized A/V clips, applying each transition before its destination clip."""
     if not clips:
@@ -76,7 +84,7 @@ def assemble_with_transitions(
     from flipthis_video_maker.media.ffmpeg import duration
 
     for index, clip in enumerate(clips):
-        durations.append(duration(clip))
+        durations.append(duration(clip, cancel_requested=cancel_requested))
         filters.extend(
             [
                 f"[{index}:v]fps={fps},format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[v{index}]",
@@ -175,12 +183,17 @@ def assemble_with_transitions(
             str(temporary),
         ]
     )
-    run(args)
+    run(args, cancel_requested=cancel_requested)
     temporary.replace(output)
     return output, applied
 
 
-def thumbnail(video: Path, output: Path) -> Path:
+def thumbnail(
+    video: Path,
+    output: Path,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     run(
         [
@@ -195,7 +208,8 @@ def thumbnail(video: Path, output: Path) -> Path:
             "-frames:v",
             "1",
             str(output),
-        ]
+        ],
+        cancel_requested=cancel_requested,
     )
     return output
 
