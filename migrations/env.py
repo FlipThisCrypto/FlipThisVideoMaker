@@ -1,7 +1,9 @@
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy.engine import make_url
 
 from flipthis_video_maker.config.settings import get_settings
 from flipthis_video_maker.database.session import Base
@@ -9,6 +11,16 @@ from flipthis_video_maker.domain import models  # noqa: F401
 
 config = context.config
 database_url = config.attributes.get("database_url", get_settings().database_url)
+
+
+def ensure_sqlite_parent(url_value: object) -> None:
+    url = make_url(str(url_value))
+    database = url.database
+    if url.get_backend_name() == "sqlite" and database and database != ":memory:":
+        Path(database).expanduser().parent.mkdir(parents=True, exist_ok=True)
+
+
+ensure_sqlite_parent(database_url)
 config.set_main_option("sqlalchemy.url", str(database_url))
 if config.config_file_name:
     fileConfig(config.config_file_name)
