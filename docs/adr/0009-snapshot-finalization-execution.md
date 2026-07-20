@@ -1,7 +1,16 @@
 # ADR 0009: Snapshot final-render execution inputs
 
-- **Status:** Accepted; implementation pending
+- **Status:** Accepted; implemented and exercised
 - **Date:** 2026-07-12
+
+## Evidence update (2026-07-20)
+
+The decision is implemented across the API, immutable Job payload, worker revalidation, mock render
+pipeline, Asset provenance, Render metadata, and React render form. Focused contract, persistence,
+pipeline, and component tests pass for sidecar, soft, and burned subtitles; normalization; music
+selection and ducking; invalid or tampered Assets; restart/retry; cancellation; and immutable reruns.
+The full repository validation recorded in `docs/current-status.md` passed before this phase was
+committed.
 
 ## Context
 

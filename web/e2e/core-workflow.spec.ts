@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("creates, plans, renders, and regenerates a local mock project", async ({ page }) => {
+test("creates, plans, renders, and regenerates a local mock project", async ({
+  page,
+}) => {
   const projectName = `Playwright project ${Date.now()}`;
 
   await page.goto("/projects");
@@ -21,29 +23,47 @@ test("creates, plans, renders, and regenerates a local mock project", async ({ p
   await page.goto(projectUrl);
   await page
     .getByLabel("Story text")
-    .fill("Nova and Ash enter an abandoned arcade and restore its last glowing machine.");
+    .fill(
+      "Nova and Ash enter an abandoned arcade and restore its last glowing machine.",
+    );
   await page.getByRole("button", { name: "Save story" }).click();
   await expect(page.getByText("Story saved")).toBeVisible();
   await page.getByRole("button", { name: "Plan mock storyboard" }).click();
   await expect(page.getByText(/Shot 4 ·/)).toBeVisible();
 
+  await page.getByLabel("Subtitle output").selectOption("soft");
+  await page.getByLabel("Normalize final audio loudness").check();
+  await expect(page.getByLabel("Integrated loudness (LUFS)")).toBeEnabled();
   await page.getByRole("button", { name: "Render with mocks" }).click();
-  await expect(page.getByText("Render queued with the draft profile.")).toBeVisible();
+  await expect(
+    page.getByText(
+      "Render queued with the draft profile, soft subtitles, and loudness normalization.",
+    ),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Jobs" }).click();
-  const renderJob = page.getByRole("article").filter({ hasText: "mock_project_render" });
+  const renderJob = page
+    .getByRole("article")
+    .filter({ hasText: "mock_project_render" });
   await expect(renderJob).toContainText("succeeded");
 
   await page.getByRole("link", { name: "Renders" }).click();
-  const renderCard = page.getByRole("article").filter({ hasText: "draft render" });
+  const renderCard = page
+    .getByRole("article")
+    .filter({ hasText: "draft render" });
   await expect(renderCard).toContainText("854x480 · 24fps · libx264");
-  const videoPath = await renderCard.getByRole("link", { name: "Open MP4" }).getAttribute("href");
+  const videoPath = await renderCard
+    .getByRole("link", { name: "Open MP4" })
+    .getAttribute("href");
   expect(videoPath).toBeTruthy();
   const videoResponse = await page.request.get(videoPath!);
   expect(videoResponse.ok()).toBeTruthy();
   expect(videoResponse.headers()["content-type"]).toContain("video/mp4");
 
   await page.goto(projectUrl);
-  await page.getByRole("button", { name: "Regenerate new seed" }).first().click();
+  await page
+    .getByRole("button", { name: "Regenerate new seed" })
+    .first()
+    .click();
   await page.getByRole("link", { name: "Jobs" }).click();
   const regenerationJob = page
     .getByRole("article")

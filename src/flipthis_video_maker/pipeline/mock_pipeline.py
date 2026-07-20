@@ -1,10 +1,14 @@
+import os
+import tempfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from flipthis_video_maker.config.render_finalization import RenderFinalizationExecution
 from flipthis_video_maker.config.render_profiles import (
     RenderProfileConfigurationFile,
     RenderProfileExecution,
@@ -23,7 +27,19 @@ from flipthis_video_maker.domain.models import (
     Shot,
 )
 from flipthis_video_maker.domain.state_machine import validate_transition
-from flipthis_video_maker.media.ffmpeg import extract_frame
+from flipthis_video_maker.media.ffmpeg import checksum, extract_frame, run
+from flipthis_video_maker.media.finalization import (
+    AudioFinalizationOptions,
+    AudioFinalizationResult,
+    BackgroundMusicOptions,
+    BurnSubtitleOptions,
+    LoudnessTarget,
+    SoftSubtitleOptions,
+    SubtitleFinalizationResult,
+    burn_subtitles,
+    mux_soft_subtitles,
+    normalize_audio,
+)
 from flipthis_video_maker.media.render import (
     assemble_with_transitions,
     contact_sheet,
@@ -65,6 +81,8 @@ class MockPipeline:
         progress: Callable[[float, str], None] | None = None,
         render_profiles: RenderProfileConfigurationFile | None = None,
         render_profile_execution: RenderProfileExecution | None = None,
+        render_finalization_execution: RenderFinalizationExecution | None = None,
+        music_asset: Asset | None = None,
         job_attempt: int = 1,
         gpu_assignment: str = "cpu",
         profile_fallback: FallbackCallback | None = None,
@@ -75,6 +93,10 @@ class MockPipeline:
         self.progress = progress
         self.render_profiles = render_profiles
         self.render_profile_execution = render_profile_execution
+        self.render_finalization_execution = (
+            render_finalization_execution or RenderFinalizationExecution.compatibility_default()
+        )
+        self.music_asset = music_asset
         self.job_attempt = job_attempt
         self.gpu_assignment = gpu_assignment
         self.profile_fallback = profile_fallback
@@ -89,6 +111,15 @@ class MockPipeline:
         project = self.db.get(Project, project_id)
         if project is None:
             raise ValueError(f"Unknown project {project_id}")
+        self._validate_finalization_inputs(project)
+        finalization = self.render_finalization_execution
+        finalization_payload = finalization.model_dump(mode="json")
+        if finalization.subtitle.mode != "sidecar" and not any(
+            shot.dialogue.strip() for scene in project.scenes for shot in scene.shots
+        ):
+            raise ValueError(
+                f"{finalization.subtitle.mode} subtitles require at least one subtitle cue"
+            )
         if self.render_profile_execution is not None:
             execution = self.render_profile_execution
             if (
@@ -120,7 +151,7 @@ class MockPipeline:
         clips: list[Path] = []
         selected_clip_asset_ids: list[str] = []
         transitions: list[tuple[str, int]] = []
-        actual_ends: list[Path] = []
+        actual_end_count = 0
         previous_shot: Shot | None = None
         shot_index = 0
         total_shots = sum(len(scene.shots) for scene in project.scenes)
@@ -491,7 +522,7 @@ class MockPipeline:
                 clips.append(output)
                 selected_clip_asset_ids.append(selected_video_asset.id)
                 transitions.append((shot.transition_type, shot.overlap_frame_count))
-                actual_ends.append(actual_end_path)
+                actual_end_count += 1
                 previous_shot = shot
                 shot_index += 1
                 self.db.commit()
@@ -503,38 +534,304 @@ class MockPipeline:
         self._check_cancelled()
         self._report_progress(0.8, "assembling final media")
         render_dir = root / "renders" / run_id
-        final_path, applied_transitions = assemble_with_transitions(
-            clips,
-            transitions,
-            render_dir / "final.mp4",
-            fps=profile.fps,
-            width=profile.width,
-            height=profile.height,
-            video_codec=profile.video_codec,
-            audio_codec=profile.audio_codec,
+        finalization_provenance = {
+            **profile_provenance,
+            "render_finalization_execution": finalization_payload,
+        }
+        media_stages: list[dict[str, object]] = []
+        has_media_finalization = (
+            finalization.audio.normalize or finalization.subtitle.mode != "sidecar"
+        )
+        assembly_path = render_dir / ("assembled.mp4" if has_media_finalization else "final.mp4")
+        try:
+            assembly_path, applied_transitions = assemble_with_transitions(
+                clips,
+                transitions,
+                assembly_path,
+                fps=profile.fps,
+                width=profile.width,
+                height=profile.height,
+                video_codec=profile.video_codec,
+                audio_codec=profile.audio_codec,
+                cancel_requested=self.cancel_requested,
+            )
+        except BaseException:
+            self._remove_stage_partials(assembly_path)
+            raise
+        assembly_asset = register_asset(
+            self.db,
+            project_id=project.id,
+            shot_id=None,
+            kind="assembled_render" if has_media_finalization else "final_render",
+            path=assembly_path,
+            provider="ffmpeg",
+            model="transition-assembler-v1",
+            generation_parameters={
+                **finalization_provenance,
+                "finalization_stage": "assembly",
+                "transitions": applied_transitions,
+            },
+            parents=selected_clip_asset_ids,
             cancel_requested=self.cancel_requested,
         )
+        media_stages.append(self._stage_record("assembly", assembly_asset, root, applied=True))
+        self.db.commit()
+        self._report_progress(0.84, "assembled final timeline")
+
         subtitles = self._subtitle_entries(project, fps=profile.fps)
-        subtitle_path = write_subtitles(subtitles, render_dir / "final.srt")
-        thumb_path = thumbnail(
+        subtitle_path = self._write_subtitles_immutable(
+            subtitles,
+            render_dir / "final.srt",
+        )
+        subtitle_asset = register_asset(
+            self.db,
+            project_id=project.id,
+            shot_id=None,
+            kind="subtitle_sidecar",
+            path=subtitle_path,
+            provider="flipthis-core",
+            model="srt-timeline-v1",
+            generation_parameters={
+                **finalization_provenance,
+                "finalization_stage": "subtitle_sidecar",
+                "cue_count": len(subtitles),
+            },
+            parents=selected_clip_asset_ids,
+            cancel_requested=self.cancel_requested,
+        )
+        media_stages.append(
+            self._stage_record("subtitle_sidecar", subtitle_asset, root, applied=True)
+        )
+        self.db.commit()
+        self._report_progress(0.87, "created subtitle sidecar")
+
+        current_path = assembly_path
+        current_asset = assembly_asset
+        audio_result_metadata: dict[str, object] | None = None
+        if finalization.audio.normalize:
+            self._report_progress(0.88, "normalizing and mixing audio")
+            audio_output = render_dir / (
+                "audio-finalized.mp4" if finalization.subtitle.mode != "sidecar" else "final.mp4"
+            )
+            loudness = LoudnessTarget(
+                integrated_lufs=finalization.audio.integrated_lufs,
+                loudness_range_lu=finalization.audio.loudness_range_lu,
+                true_peak_dbfs=finalization.audio.true_peak_dbfs,
+            )
+            music_options = self._music_options()
+            audio_result = normalize_audio(
+                current_path,
+                audio_output,
+                options=AudioFinalizationOptions(
+                    loudness=loudness,
+                    audio_codec=profile.audio_codec,
+                ),
+                music=music_options,
+                cancel_requested=self.cancel_requested,
+            )
+            audio_result_metadata = self._audio_result_record(audio_result)
+            audio_parents = [current_asset.id]
+            if self.music_asset is not None:
+                audio_parents.append(self.music_asset.id)
+            current_asset = register_asset(
+                self.db,
+                project_id=project.id,
+                shot_id=None,
+                kind=(
+                    "audio_finalized_render"
+                    if finalization.subtitle.mode != "sidecar"
+                    else "final_render"
+                ),
+                path=audio_output,
+                provider="ffmpeg",
+                model=("loudnorm-ducking-v1" if self.music_asset is not None else "loudnorm-v1"),
+                generation_parameters={
+                    **finalization_provenance,
+                    "finalization_stage": "audio",
+                    "result": audio_result_metadata,
+                },
+                parents=audio_parents,
+                cancel_requested=self.cancel_requested,
+            )
+            current_path = audio_output
+            media_stages.append(
+                self._stage_record(
+                    "audio",
+                    current_asset,
+                    root,
+                    applied=True,
+                    result=audio_result_metadata,
+                )
+            )
+            self.db.commit()
+            self._report_progress(0.91, "finalized audio")
+        else:
+            media_stages.append(
+                {
+                    "stage": "audio",
+                    "applied": False,
+                    "reason": "not_requested",
+                    "asset_id": None,
+                }
+            )
+
+        subtitle_result_metadata: dict[str, object] | None = None
+        if finalization.subtitle.mode != "sidecar":
+            self._report_progress(0.92, f"applying {finalization.subtitle.mode} subtitles")
+            if finalization.subtitle.mode == "soft":
+                subtitle_result = mux_soft_subtitles(
+                    current_path,
+                    subtitle_path,
+                    render_dir / "final.mp4",
+                    options=SoftSubtitleOptions(
+                        language=finalization.subtitle.language,
+                        title=finalization.subtitle.title,
+                        default=finalization.subtitle.default,
+                        forced=finalization.subtitle.forced,
+                    ),
+                    cancel_requested=self.cancel_requested,
+                )
+                subtitle_model = "subtitle-mux-v1"
+            else:
+                subtitle_result = burn_subtitles(
+                    current_path,
+                    subtitle_path,
+                    render_dir / "final.mp4",
+                    options=BurnSubtitleOptions(video_codec=profile.video_codec),
+                    cancel_requested=self.cancel_requested,
+                )
+                subtitle_model = "subtitle-burn-v1"
+            subtitle_result_metadata = self._subtitle_result_record(subtitle_result)
+            current_asset = register_asset(
+                self.db,
+                project_id=project.id,
+                shot_id=None,
+                kind="final_render",
+                path=subtitle_result.output_path,
+                provider="ffmpeg",
+                model=subtitle_model,
+                generation_parameters={
+                    **finalization_provenance,
+                    "finalization_stage": "subtitles",
+                    "result": subtitle_result_metadata,
+                },
+                parents=[current_asset.id, subtitle_asset.id],
+                cancel_requested=self.cancel_requested,
+            )
+            current_path = subtitle_result.output_path
+            media_stages.append(
+                self._stage_record(
+                    "subtitles",
+                    current_asset,
+                    root,
+                    applied=True,
+                    result=subtitle_result_metadata,
+                )
+            )
+            self.db.commit()
+            self._report_progress(0.95, "finalized subtitles")
+        else:
+            media_stages.append(
+                {
+                    "stage": "subtitles",
+                    "applied": False,
+                    "reason": "sidecar_only",
+                    "asset_id": None,
+                }
+            )
+
+        final_path = current_path
+        final_asset = current_asset
+        expected_final_duration = sum(
+            shot.duration for scene in project.scenes for shot in scene.shots
+        ) - sum(float(item["duration"]) for item in applied_transitions)
+        self._report_progress(0.96, "validating final media")
+        final_quality = analyze_video(
+            final_path,
+            expected_final_duration,
+            profile.width,
+            profile.height,
+            profile.fps,
+            audio_expected=True,
+            audible_audio_expected=bool(self.music_asset)
+            or any(shot.dialogue.strip() for scene in project.scenes for shot in scene.shots),
+            cancel_requested=self.cancel_requested,
+        )
+        required_final_checks = {
+            "decodable_video",
+            "duration_in_tolerance",
+            "dimensions_correct",
+            "frame_rate_valid",
+            "frame_rate_correct",
+            "audio_present_when_expected",
+        }
+        failed_required_checks = sorted(
+            key for key in required_final_checks if not bool(final_quality["checks"].get(key))
+        )
+        if failed_required_checks:
+            raise RuntimeError(
+                "Final render failed required media QA: " + ", ".join(failed_required_checks)
+            )
+
+        thumb_path = self._thumbnail_immutable(
             final_path,
             render_dir / "thumbnail.jpg",
+        )
+        thumbnail_asset = register_asset(
+            self.db,
+            project_id=project.id,
+            shot_id=None,
+            kind="render_thumbnail",
+            path=thumb_path,
+            provider="ffmpeg",
+            model="thumbnail-v1",
+            generation_parameters=finalization_provenance,
+            parents=[final_asset.id],
             cancel_requested=self.cancel_requested,
         )
-        contact_path = contact_sheet(actual_ends, render_dir / "contact-sheet.jpg")
+        self.db.commit()
+
+        contact_path = self._contact_sheet_from_final(
+            final_path,
+            render_dir / "contact-sheet.jpg",
+            frame_count=max(1, actual_end_count),
+            duration_seconds=float(final_quality["duration"]),
+        )
+        contact_asset = register_asset(
+            self.db,
+            project_id=project.id,
+            shot_id=None,
+            kind="render_contact_sheet",
+            path=contact_path,
+            provider="ffmpeg",
+            model="timeline-contact-sheet-v1",
+            generation_parameters=finalization_provenance,
+            parents=[final_asset.id],
+            cancel_requested=self.cancel_requested,
+        )
+        self.db.commit()
         self._check_cancelled()
         manifest_path = root / "manifests" / f"{run_id}.json"
         manifest = {
-            "version": 1,
+            "version": 2,
             "run_id": run_id,
             "project_id": project.id,
             "requested_render_profile": execution.requested_profile,
             "effective_render_profile": profile_name,
             "render_profile_execution": execution_payload,
+            "render_finalization_execution": finalization_payload,
             "render": str(final_path.relative_to(root)),
             "subtitles": str(subtitle_path.relative_to(root)),
             "thumbnail": str(thumb_path.relative_to(root)),
             "contact_sheet": str(contact_path.relative_to(root)),
+            "final_quality": final_quality,
+            "finalization_stages": media_stages,
+            "asset_ids": {
+                "render": final_asset.id,
+                "subtitles": subtitle_asset.id,
+                "thumbnail": thumbnail_asset.id,
+                "contact_sheet": contact_asset.id,
+            },
             "transitions": applied_transitions,
             "shots": [
                 {
@@ -552,18 +849,24 @@ class MockPipeline:
             ],
         }
         write_manifest(manifest_path, manifest)
-        final_asset = register_asset(
+        manifest_asset = register_asset(
             self.db,
             project_id=project.id,
             shot_id=None,
-            kind="final_render",
-            path=final_path,
-            provider="ffmpeg",
-            model="transition-assembler-v1",
-            generation_parameters=profile_provenance,
-            parents=selected_clip_asset_ids,
+            kind="project_manifest",
+            path=manifest_path,
+            provider="flipthis-core",
+            model="manifest-v2",
+            generation_parameters=finalization_provenance,
+            parents=[
+                final_asset.id,
+                subtitle_asset.id,
+                thumbnail_asset.id,
+                contact_asset.id,
+            ],
             cancel_requested=self.cancel_requested,
         )
+        self.db.commit()
         render = Render(
             project_id=project.id,
             render_profile=profile_name,
@@ -577,8 +880,19 @@ class MockPipeline:
                 "codec": profile.audio_codec,
                 "sample_rate": 48000,
                 "channels": 2,
+                "normalize": finalization.audio.normalize,
+                "target": finalization.audio.model_dump(mode="json"),
+                "music_asset_id": (
+                    finalization.music.asset_id if finalization.music is not None else None
+                ),
+                "result": audio_result_metadata,
             },
-            subtitle_configuration={"path": str(subtitle_path)},
+            subtitle_configuration={
+                **finalization.subtitle.model_dump(mode="json"),
+                "path": str(subtitle_path),
+                "asset_id": subtitle_asset.id,
+                "result": subtitle_result_metadata,
+            },
             creation_metadata={
                 "run_id": run_id,
                 "manifest": str(manifest_path),
@@ -586,9 +900,16 @@ class MockPipeline:
                 "contact_sheet": str(contact_path),
                 "transitions": applied_transitions,
                 "output_asset_id": final_asset.id,
+                "manifest_asset_id": manifest_asset.id,
+                "subtitle_asset_id": subtitle_asset.id,
+                "thumbnail_asset_id": thumbnail_asset.id,
+                "contact_sheet_asset_id": contact_asset.id,
                 "requested_render_profile": execution.requested_profile,
                 "effective_render_profile": profile_name,
                 "render_profile_execution": execution_payload,
+                "render_finalization_execution": finalization_payload,
+                "finalization_stages": media_stages,
+                "final_quality": final_quality,
             },
         )
         project.status = ProjectStatus.COMPLETE.value
@@ -605,6 +926,202 @@ class MockPipeline:
     def _report_progress(self, value: float, stage: str) -> None:
         if self.progress:
             self.progress(value, stage)
+
+    def _validate_finalization_inputs(self, project: Project) -> None:
+        captured = self.render_finalization_execution.music
+        if captured is None:
+            if self.music_asset is not None:
+                raise ValueError("A music Asset was supplied without captured music settings")
+            return
+        if self.music_asset is None:
+            raise ValueError("Captured background music requires its immutable Asset")
+        asset = self.music_asset
+        if asset.id != captured.asset_id:
+            raise ValueError("Background-music Asset does not match the captured Asset ID")
+        if asset.project_id != project.id:
+            raise ValueError("Background-music Asset belongs to another project")
+        if asset.mime_type != captured.mime_type:
+            raise ValueError("Background-music MIME type changed after enqueue")
+        if asset.checksum != captured.checksum:
+            raise ValueError("Background-music database checksum changed after enqueue")
+        path = Path(asset.file_path)
+        if not path.is_file():
+            raise ValueError("Background-music file is missing")
+        try:
+            path.resolve().relative_to(Path(project.root_asset_directory).resolve())
+        except ValueError as error:
+            raise ValueError("Background-music file escapes the project asset root") from error
+        if checksum(path) != captured.checksum:
+            raise ValueError("Background-music file checksum changed after enqueue")
+
+    def _music_options(self) -> BackgroundMusicOptions | None:
+        captured = self.render_finalization_execution.music
+        if captured is None:
+            return None
+        if self.music_asset is None:
+            raise RuntimeError("Validated background-music Asset is unavailable")
+        return BackgroundMusicOptions(
+            path=Path(self.music_asset.file_path),
+            gain_db=captured.gain_db,
+            threshold=captured.threshold,
+            ratio=captured.ratio,
+            attack_ms=captured.attack_ms,
+            release_ms=captured.release_ms,
+            loop=captured.loop,
+        )
+
+    def _write_subtitles_immutable(
+        self,
+        entries: list[tuple[float, float, str]],
+        output: Path,
+    ) -> Path:
+        self._check_cancelled()
+        if os.path.lexists(output):
+            raise FileExistsError(output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        temporary = output.with_name(f".{output.stem}-{uuid.uuid4().hex}.partial{output.suffix}")
+        try:
+            write_subtitles(entries, temporary)
+            self._check_cancelled()
+            if os.path.lexists(output):
+                raise FileExistsError(output)
+            temporary.replace(output)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        return output
+
+    def _thumbnail_immutable(self, video: Path, output: Path) -> Path:
+        self._check_cancelled()
+        if os.path.lexists(output):
+            raise FileExistsError(output)
+        temporary = output.with_name(f".{output.stem}-{uuid.uuid4().hex}.partial{output.suffix}")
+        try:
+            thumbnail(
+                video,
+                temporary,
+                cancel_requested=self.cancel_requested,
+            )
+            self._check_cancelled()
+            if os.path.lexists(output):
+                raise FileExistsError(output)
+            temporary.replace(output)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        return output
+
+    def _contact_sheet_from_final(
+        self,
+        video: Path,
+        output: Path,
+        *,
+        frame_count: int,
+        duration_seconds: float,
+    ) -> Path:
+        self._check_cancelled()
+        if os.path.lexists(output):
+            raise FileExistsError(output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        temporary_output = output.with_name(
+            f".{output.stem}-{uuid.uuid4().hex}.partial{output.suffix}"
+        )
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix=".contact-frames-",
+                dir=output.parent,
+            ) as temporary_directory:
+                frames: list[Path] = []
+                for index in range(frame_count):
+                    self._check_cancelled()
+                    timestamp = duration_seconds * (index + 0.5) / frame_count
+                    frame = Path(temporary_directory) / f"frame-{index:03d}.png"
+                    run(
+                        [
+                            get_settings().ffmpeg_path,
+                            "-nostdin",
+                            "-y",
+                            "-v",
+                            "error",
+                            "-ss",
+                            f"{timestamp:.6f}",
+                            "-i",
+                            str(video),
+                            "-frames:v",
+                            "1",
+                            str(frame),
+                        ],
+                        cancel_requested=self.cancel_requested,
+                    )
+                    frames.append(frame)
+                contact_sheet(frames, temporary_output)
+            self._check_cancelled()
+            if os.path.lexists(output):
+                raise FileExistsError(output)
+            temporary_output.replace(output)
+        except BaseException:
+            temporary_output.unlink(missing_ok=True)
+            raise
+        return output
+
+    @staticmethod
+    def _remove_stage_partials(output: Path) -> None:
+        for partial in output.parent.glob(f".{output.stem}-*.partial{output.suffix}"):
+            partial.unlink(missing_ok=True)
+
+    @staticmethod
+    def _stage_record(
+        stage: str,
+        asset: Asset,
+        root: Path,
+        *,
+        applied: bool,
+        result: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        record: dict[str, object] = {
+            "stage": stage,
+            "applied": applied,
+            "asset_id": asset.id,
+            "asset_type": asset.type,
+            "path": str(Path(asset.file_path).relative_to(root)),
+            "checksum": asset.checksum,
+            "parent_asset_ids": asset.parent_asset_ids,
+        }
+        if result is not None:
+            record["result"] = result
+        return record
+
+    @staticmethod
+    def _audio_result_record(result: AudioFinalizationResult) -> dict[str, object]:
+        return {
+            "source_video_duration_seconds": result.source_video_duration_seconds,
+            "output_video_duration_seconds": result.output_video_duration_seconds,
+            "width": result.width,
+            "height": result.height,
+            "frame_rate": result.frame_rate,
+            "video_codec": result.video_codec,
+            "audio_codec": result.audio_codec,
+            "sample_rate": result.sample_rate,
+            "channels": result.channels,
+            "target": asdict(result.target),
+            "pre_normalization": asdict(result.pre_normalization),
+            "music_ducking_applied": result.music_ducking_applied,
+        }
+
+    @staticmethod
+    def _subtitle_result_record(result: SubtitleFinalizationResult) -> dict[str, object]:
+        return {
+            "mode": result.mode.value,
+            "source_video_duration_seconds": result.source_video_duration_seconds,
+            "output_video_duration_seconds": result.output_video_duration_seconds,
+            "width": result.width,
+            "height": result.height,
+            "frame_rate": result.frame_rate,
+            "video_codec": result.video_codec,
+            "audio_codec": result.audio_codec,
+            "subtitle_codec": result.subtitle_codec,
+            "subtitle_stream_count": result.subtitle_stream_count,
+        }
 
     async def _execute_provider[ResultT](
         self,

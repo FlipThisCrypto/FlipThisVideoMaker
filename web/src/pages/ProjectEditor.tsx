@@ -6,15 +6,32 @@ import {
   enqueueProjectRender,
   enqueueShotRegeneration,
 } from "../api/generation";
+import {
+  createDefaultMusic,
+  createDefaultRenderFinalization,
+} from "../api/renderFinalization";
 import { useRenderProfiles } from "../api/renderProfiles";
+import { RenderFinalizationControls } from "../components/RenderFinalizationControls";
 import { RenderProfileSelect } from "../components/RenderProfileSelect";
-import type { Candidate, Project, RenderProfile, Scene, Shot } from "../types";
+import type {
+  Asset,
+  Candidate,
+  Project,
+  ProjectRenderRequest,
+  RenderFinalizationRequest,
+  RenderProfile,
+  Scene,
+  Shot,
+} from "../types";
 export function ProjectEditor() {
   const { id } = useParams();
   const client = useQueryClient();
   const [story, setStory] = useState("");
   const [projectProfile, setProjectProfile] = useState("");
   const [renderProfile, setRenderProfile] = useState("");
+  const [finalization, setFinalization] = useState<RenderFinalizationRequest>(
+    createDefaultRenderFinalization,
+  );
   const profileCatalog = useRenderProfiles();
   const { data: project } = useQuery({
     queryKey: ["project", id],
@@ -28,10 +45,39 @@ export function ProjectEditor() {
     queryKey: ["scenes", id],
     queryFn: () => api<Scene[]>(`/projects/${id}/scenes`),
   });
+  const assetsQuery = useQuery({
+    queryKey: ["assets", id],
+    queryFn: () => api<Asset[]>(`/projects/${id}/assets`),
+  });
+  const assets = assetsQuery.data ?? [];
   const render = useMutation({
-    mutationFn: (profile: string) => enqueueProjectRender(id!, profile),
+    mutationFn: (request: ProjectRenderRequest) =>
+      enqueueProjectRender(id!, request),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
   });
+  const uploadMusic = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return api<Asset>(`/projects/${id}/assets`, {
+        method: "POST",
+        body: form,
+      });
+    },
+    onSuccess: (asset) => {
+      client.setQueryData<Asset[]>(["assets", id], (current = []) => [
+        asset,
+        ...current.filter((item) => item.id !== asset.id),
+      ]);
+      setFinalization((current) => ({
+        ...current,
+        audio: { ...current.audio, normalize: true },
+        music: createDefaultMusic(asset.id),
+      }));
+      void client.invalidateQueries({ queryKey: ["assets", id] });
+    },
+  });
+  const resetUploadMusic = uploadMusic.reset;
   const saveProjectProfile = useMutation({
     mutationFn: () =>
       api<Project>(`/projects/${id}`, {
@@ -89,7 +135,9 @@ export function ProjectEditor() {
   useEffect(() => {
     setProjectProfile("");
     setRenderProfile("");
-  }, [id]);
+    setFinalization(createDefaultRenderFinalization());
+    resetUploadMusic();
+  }, [id, resetUploadMusic]);
   useEffect(() => {
     if (!storedProfile) return;
     setProjectProfile(storedProfile);
@@ -102,6 +150,10 @@ export function ProjectEditor() {
   );
   const renderProfileIsConfigured = configuredProfiles.some(
     (profile) => profile.name === renderProfile,
+  );
+  const audioAssets = assets.filter(
+    (asset) =>
+      asset.mime_type === "audio/wav" || asset.mime_type === "audio/mpeg",
   );
   return (
     <>
@@ -179,6 +231,24 @@ export function ProjectEditor() {
             This choice applies to the queued render without changing the
             project default.
           </p>
+          <RenderFinalizationControls
+            value={finalization}
+            audioAssets={audioAssets}
+            onChange={(value) => {
+              uploadMusic.reset();
+              setFinalization(value);
+            }}
+            onUpload={(file) => uploadMusic.mutate(file)}
+            disabled={render.isPending}
+            uploadPending={uploadMusic.isPending}
+            uploadError={uploadMusic.isError ? uploadMusic.error.message : ""}
+            uploadSucceeded={uploadMusic.isSuccess}
+          />
+          {assetsQuery.isError && (
+            <p className="mt-2 text-sm text-red-300" role="alert">
+              Music assets could not be loaded: {assetsQuery.error.message}
+            </p>
+          )}
           <button
             className="button mt-3"
             disabled={
@@ -188,7 +258,12 @@ export function ProjectEditor() {
               profileCatalog.isError ||
               !renderProfileIsConfigured
             }
-            onClick={() => render.mutate(renderProfile)}
+            onClick={() =>
+              render.mutate({
+                render_profile: renderProfile,
+                finalization,
+              })
+            }
             title={
               shots.length === 0
                 ? "Add storyboard shots before rendering"
@@ -199,7 +274,10 @@ export function ProjectEditor() {
           </button>
           {render.isSuccess && (
             <p className="mt-2 text-sm text-teal-200" aria-live="polite">
-              Render queued with the {render.variables} profile.
+              Render queued with the {render.variables.render_profile} profile,{" "}
+              {render.variables.finalization.subtitle.mode} subtitles, and
+              {render.variables.finalization.audio.normalize ? " " : " no "}
+              loudness normalization.
             </p>
           )}
           {render.isError && (
@@ -271,7 +349,9 @@ export function ProjectEditor() {
       )}
       <div className="grid gap-4 md:grid-cols-2">
         {shots.map((shot) => {
-          const siblings = shots.filter((item) => item.scene_id === shot.scene_id);
+          const siblings = shots.filter(
+            (item) => item.scene_id === shot.scene_id,
+          );
           const index = siblings.findIndex((item) => item.id === shot.id);
           return (
             <ShotCard

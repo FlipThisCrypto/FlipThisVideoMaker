@@ -7,6 +7,10 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from flipthis_video_maker.config.render_finalization import (
+    RENDER_FINALIZATION_EXECUTION_KEY,
+    RenderFinalizationExecution,
+)
 from flipthis_video_maker.config.render_profiles import RENDER_PROFILE_EXECUTION_KEY
 from flipthis_video_maker.config.settings import Settings, get_settings
 from flipthis_video_maker.database.session import get_db
@@ -235,7 +239,13 @@ async def test_render_and_regeneration_jobs_capture_immutable_profile_execution(
         ],
         "fallback_history": [],
     }
-    assert render_job.payload == {RENDER_PROFILE_EXECUTION_KEY: expected_execution}
+    expected_finalization = RenderFinalizationExecution.compatibility_default().model_dump(
+        mode="json"
+    )
+    assert render_job.payload == {
+        RENDER_PROFILE_EXECUTION_KEY: expected_execution,
+        RENDER_FINALIZATION_EXECUTION_KEY: expected_finalization,
+    }
     default_execution = default_render_job.payload[RENDER_PROFILE_EXECUTION_KEY]
     assert default_execution["requested_profile"] == "preview"
     assert default_execution["effective_profile"] == "preview"

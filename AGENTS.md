@@ -8,9 +8,10 @@ Build a local-first, provider-neutral AI video production studio. The immediate 
 
 Before changing code, read:
 
-1. `docs/current-status.md` — exact implementation and validation status.
-2. The original user specification in the preceding Codex conversation, if available.
-3. Once created, the architecture and ADR documents under `docs/`.
+1. `MEMORY.md` — durable product goal, acceptance threshold, and user-mandated constraints.
+2. `docs/current-status.md` — exact implementation and validation status.
+3. The original user specification in the preceding Codex conversation, if available.
+4. Once created, the architecture and ADR documents under `docs/`.
 
 Do not assume existing code works merely because it imports or compiles. Treat only the checks and
 runtime probes recorded in `docs/current-status.md` as exercised evidence, and rerun relevant checks

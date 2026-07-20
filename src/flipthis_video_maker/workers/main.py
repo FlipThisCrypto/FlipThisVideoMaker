@@ -11,6 +11,11 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from flipthis_video_maker.config.render_finalization import (
+    RENDER_FINALIZATION_EXECUTION_KEY,
+    RenderFinalizationExecution,
+    render_finalization_execution_from_payload,
+)
 from flipthis_video_maker.config.render_profiles import (
     RENDER_PROFILE_EXECUTION_KEY,
     RenderProfileConfigurationFile,
@@ -22,7 +27,7 @@ from flipthis_video_maker.config.settings import get_settings
 from flipthis_video_maker.config.workers import load_worker_configuration
 from flipthis_video_maker.database.session import SessionLocal
 from flipthis_video_maker.domain.enums import JobState, WorkerState
-from flipthis_video_maker.domain.models import Job, Project
+from flipthis_video_maker.domain.models import Asset, Job, Project
 from flipthis_video_maker.media.ffmpeg import MediaCancelled
 from flipthis_video_maker.pipeline.mock_pipeline import MockPipeline, PipelineCancelled
 from flipthis_video_maker.pipeline.shot_regeneration import MockShotRegenerator
@@ -44,6 +49,7 @@ from flipthis_video_maker.services.jobs import (
     mark_failed,
     mark_succeeded,
 )
+from flipthis_video_maker.services.render_finalization import revalidate_render_finalization
 from flipthis_video_maker.services.workers import WorkerHeartbeatReporter
 
 logger = structlog.get_logger(__name__)
@@ -130,6 +136,18 @@ async def _process_claimed_job(
             project,
             render_profiles,
         )
+        finalization_execution: RenderFinalizationExecution | None = None
+        music_asset: Asset | None = None
+        if job.job_type == "mock_project_render":
+            finalization_execution = _resolve_render_finalization_execution(db, job)
+            music_asset = revalidate_render_finalization(
+                db,
+                project,
+                finalization_execution,
+            )
+            expected_input_asset_ids = [music_asset.id] if music_asset is not None else []
+            if job.input_asset_ids != expected_input_asset_ids:
+                raise RuntimeError("Render Job input Assets do not match its finalization snapshot")
         log_path = (
             Path(project.root_asset_directory)
             / "logs"
@@ -147,6 +165,13 @@ async def _process_claimed_job(
             gpu_metrics=assigned_gpu_metrics,
             requested_render_profile=profile_execution.requested_profile,
             effective_render_profile=profile_execution.effective_profile,
+            subtitle_mode=(
+                finalization_execution.subtitle.mode if finalization_execution else None
+            ),
+            normalize_audio=(
+                finalization_execution.audio.normalize if finalization_execution else None
+            ),
+            music_asset_id=music_asset.id if music_asset is not None else None,
         )
         job.current_stage = "rendering"
         db.commit()
@@ -205,6 +230,8 @@ async def _process_claimed_job(
                 cancellation_requested,
                 report_progress,
                 render_profile_execution=profile_execution,
+                render_finalization_execution=finalization_execution,
+                music_asset=music_asset,
                 job_attempt=job.attempt_number,
                 gpu_assignment=assignment,
                 profile_fallback=persist_profile_fallback,
@@ -330,6 +357,23 @@ def _resolve_render_profile_execution(
     job.payload = {
         **payload,
         RENDER_PROFILE_EXECUTION_KEY: execution.model_dump(mode="json"),
+    }
+    db.commit()
+    return execution
+
+
+def _resolve_render_finalization_execution(
+    db: Session,
+    job: Job,
+) -> RenderFinalizationExecution:
+    payload = job.payload or {}
+    if RENDER_FINALIZATION_EXECUTION_KEY in payload:
+        return render_finalization_execution_from_payload(payload)
+
+    execution = RenderFinalizationExecution.compatibility_default()
+    job.payload = {
+        **payload,
+        RENDER_FINALIZATION_EXECUTION_KEY: execution.model_dump(mode="json"),
     }
     db.commit()
     return execution

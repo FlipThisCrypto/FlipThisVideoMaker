@@ -47,20 +47,49 @@ describe("render profile API", () => {
     );
   });
 
-  it("sends a project render profile in the JSON request body", async () => {
+  it("sends the complete finalization request with the render profile", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(() =>
         successfulResponse({ id: "job-1", state: "queued" }),
       );
 
-    await enqueueProjectRender("project-1", "final");
+    const request = {
+      render_profile: "final",
+      finalization: {
+        version: 1 as const,
+        subtitle: {
+          mode: "soft" as const,
+          language: "eng",
+          title: "English captions",
+          default: true,
+          forced: false,
+        },
+        audio: {
+          normalize: true,
+          integrated_lufs: -16,
+          loudness_range_lu: 11,
+          true_peak_dbfs: -1.5,
+        },
+        music: {
+          asset_id: "music-asset",
+          gain_db: -18,
+          loop: true,
+          threshold: 0.03,
+          ratio: 8,
+          attack_ms: 20,
+          release_ms: 300,
+        },
+      },
+    };
+
+    await enqueueProjectRender("project-1", request);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/projects/project-1/render",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ render_profile: "final" }),
+        body: JSON.stringify(request),
       }),
     );
   });

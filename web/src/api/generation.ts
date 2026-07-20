@@ -1,14 +1,18 @@
 import { api } from "./client";
+import type { ProjectRenderRequest } from "../types";
 
 interface QueuedJob {
   id: string;
   state: string;
 }
 
-export function enqueueProjectRender(projectId: string, renderProfile: string) {
+export function enqueueProjectRender(
+  projectId: string,
+  request: ProjectRenderRequest,
+) {
   return api<QueuedJob>(`/projects/${projectId}/render`, {
     method: "POST",
-    body: JSON.stringify({ render_profile: renderProfile }),
+    body: JSON.stringify(request),
   });
 }
 

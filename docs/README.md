@@ -46,6 +46,9 @@ Start with the documents in this order when resuming implementation:
 - [0004 — License repository code under MIT](adr/0004-code-license.md)
 - [0005 — Worker heartbeats are not job leases](adr/0005-worker-heartbeats-are-not-job-leases.md)
 - [0006 — Admit GPU jobs per physical device](adr/0006-admit-gpu-jobs-per-physical-device.md)
+- [0007 — Snapshot render profiles and provider-owned OOM](adr/0007-snapshot-render-profiles-and-provider-owned-oom.md)
+- [0008 — Persist completed post-processing stages](adr/0008-persist-completed-postprocessing-stages.md)
+- [0009 — Snapshot final-render execution inputs](adr/0009-snapshot-finalization-execution.md)
 
 `docs/current-status.md` is the authoritative handoff record. Update it and this map whenever a phase
 adds, removes, or renames a durable capability or document.

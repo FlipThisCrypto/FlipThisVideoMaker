@@ -3,6 +3,11 @@ from typing import Any, Literal
 
 from pydantic import AliasPath, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from flipthis_video_maker.config.render_finalization import (
+    RENDER_FINALIZATION_EXECUTION_KEY,
+    RenderFinalizationExecution,
+    RenderFinalizationRequest,
+)
 from flipthis_video_maker.config.render_profiles import (
     RENDER_PROFILE_EXECUTION_KEY,
     RenderProfileExecution,
@@ -46,7 +51,10 @@ class ProjectPatch(BaseModel):
 
 
 class ProjectRenderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     render_profile: str | None = Field(default=None, min_length=1, max_length=40)
+    finalization: RenderFinalizationRequest = Field(default_factory=RenderFinalizationRequest)
 
 
 class RenderProfileRead(BaseModel):
@@ -315,6 +323,14 @@ class JobRead(ORMModel):
         default=None,
         validation_alias=AliasPath("payload", RENDER_PROFILE_EXECUTION_KEY),
     )
+    render_finalization_execution: RenderFinalizationExecution | None = Field(
+        default=None,
+        validation_alias=AliasPath("payload", RENDER_FINALIZATION_EXECUTION_KEY),
+    )
+    render_finalization_execution_error: str | None = Field(
+        default=None,
+        validation_alias=AliasPath("payload", RENDER_FINALIZATION_EXECUTION_KEY),
+    )
 
     @field_validator("render_profile_execution", mode="before")
     @classmethod
@@ -333,6 +349,29 @@ class JobRead(ORMModel):
             return None
         try:
             RenderProfileExecution.model_validate(value)
+        except ValidationError:
+            return "invalid_snapshot"
+        return None
+
+    @field_validator("render_finalization_execution", mode="before")
+    @classmethod
+    def tolerate_invalid_finalization_execution(
+        cls, value: object
+    ) -> RenderFinalizationExecution | None:
+        if value is None:
+            return None
+        try:
+            return RenderFinalizationExecution.model_validate(value)
+        except ValidationError:
+            return None
+
+    @field_validator("render_finalization_execution_error", mode="before")
+    @classmethod
+    def report_invalid_finalization_execution(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        try:
+            RenderFinalizationExecution.model_validate(value)
         except ValidationError:
             return "invalid_snapshot"
         return None

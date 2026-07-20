@@ -14,6 +14,7 @@ from flipthis_video_maker.api.render_profiles import (
     resolve_render_profile,
 )
 from flipthis_video_maker.api.schemas import (
+    AssetRead,
     CharacterCreate,
     CharacterRead,
     JobRead,
@@ -28,6 +29,9 @@ from flipthis_video_maker.api.schemas import (
     VoiceProfileCreate,
     VoiceProfileRead,
     WorkerRead,
+)
+from flipthis_video_maker.config.render_finalization import (
+    RENDER_FINALIZATION_EXECUTION_KEY,
 )
 from flipthis_video_maker.config.render_profiles import RENDER_PROFILE_EXECUTION_KEY
 from flipthis_video_maker.config.settings import Settings, get_settings
@@ -46,7 +50,7 @@ from flipthis_video_maker.domain.models import (
     VoiceProfile,
     Worker,
 )
-from flipthis_video_maker.media.ffmpeg import checksum
+from flipthis_video_maker.media.ffmpeg import MediaError
 from flipthis_video_maker.providers.planning.deterministic import DeterministicStoryPlanner
 from flipthis_video_maker.providers.registry import (
     configured_story_planner,
@@ -56,7 +60,12 @@ from flipthis_video_maker.providers.registry import (
 from flipthis_video_maker.scheduler.gpu import discover_gpus
 from flipthis_video_maker.services.jobs import request_cancellation, retry
 from flipthis_video_maker.services.planning import apply_story_plan
+from flipthis_video_maker.services.render_finalization import (
+    RenderFinalizationInputError,
+    capture_render_finalization,
+)
 from flipthis_video_maker.services.workers import list_workers, worker_is_online
+from flipthis_video_maker.storage.assets import register_asset
 from flipthis_video_maker.storage.uploads import UploadValidationError, store_validated_upload
 
 router = APIRouter(prefix="/api/v1")
@@ -254,6 +263,7 @@ def enqueue_render(
     body: ProjectRenderRequest | None = None,
 ) -> JobRead:
     project = require(db, Project, project_id)
+    request = body or ProjectRenderRequest()
     project_shots = [shot for scene in project.scenes for shot in scene.shots]
     if not project_shots:
         raise HTTPException(409, "Project has no storyboard shots")
@@ -264,17 +274,33 @@ def enqueue_render(
     }
     if any(shot.status not in renderable_states for shot in project_shots):
         raise HTTPException(409, "Every shot must be approved before rendering")
-    requested_profile = (
-        body.render_profile if body and body.render_profile else project.resolution_profile
-    )
+    requested_profile = request.render_profile or project.resolution_profile
     execution = resolve_render_profile(settings, requested_profile)
+    try:
+        finalization_execution, music_asset = capture_render_finalization(
+            db,
+            project,
+            request.finalization,
+        )
+    except RenderFinalizationInputError as error:
+        status_code = {
+            "asset_not_found": 404,
+            "asset_project_mismatch": 400,
+            "asset_not_audio": 422,
+            "asset_outside_project": 409,
+            "asset_file_missing": 410,
+            "asset_identity_mismatch": 409,
+        }[error.code]
+        raise HTTPException(status_code, str(error)) from error
     job = Job(
         job_type="mock_project_render",
         project_id=project_id,
         provider="mock",
         gpu_assignment="cpu",
+        input_asset_ids=[music_asset.id] if music_asset is not None else [],
         payload={
             RENDER_PROFILE_EXECUTION_KEY: execution.model_dump(mode="json"),
+            RENDER_FINALIZATION_EXECUTION_KEY: finalization_execution.model_dump(mode="json"),
         },
     )
     db.add(job)
@@ -472,10 +498,14 @@ def project_renders(project_id: str, db: DB) -> list[Render]:
     )
 
 
-@router.post("/projects/{project_id}/assets", status_code=201)
+@router.post(
+    "/projects/{project_id}/assets",
+    response_model=AssetRead,
+    status_code=201,
+)
 async def upload(
     project_id: str, db: DB, settings: Config, file: Annotated[UploadFile, File()]
-) -> dict[str, str]:
+) -> Asset:
     project = require(db, Project, project_id)
     allowed = {
         "image/png",
@@ -486,29 +516,59 @@ async def upload(
         "text/markdown",
         "application/json",
     }
-    if file.content_type not in allowed:
+    content_type = file.content_type
+    if content_type not in allowed:
         raise HTTPException(415, "Unsupported upload type")
     content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     if len(content) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "Upload too large")
-    safe_name = Path(file.filename or "upload.bin").name
-    path = Path(project.root_asset_directory) / "source" / f"{uuid.uuid4()}-{safe_name}"
+    assert content_type is not None
+    safe_name = _safe_original_filename(file.filename)
+    suffix = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "audio/wav": ".wav",
+        "audio/mpeg": ".mp3",
+        "text/plain": ".txt",
+        "text/markdown": ".md",
+        "application/json": ".json",
+    }[content_type]
+    path = Path(project.root_asset_directory) / "source" / f"{uuid.uuid4().hex}{suffix}"
     try:
         store_validated_upload(
             content=content,
-            content_type=file.content_type or "application/octet-stream",
+            content_type=content_type,
             destination=path,
         )
     except UploadValidationError as error:
         raise HTTPException(400, str(error)) from error
-    asset = Asset(
-        project_id=project.id,
-        type="upload",
-        file_path=str(path),
-        mime_type=file.content_type or "application/octet-stream",
-        checksum=checksum(path),
-        source_provider="upload",
-    )
-    db.add(asset)
+    try:
+        asset = register_asset(
+            db,
+            project_id=project.id,
+            shot_id=None,
+            kind="upload",
+            path=path,
+            provider="upload",
+            mime_type=content_type,
+            generation_parameters={"original_filename": safe_name},
+        )
+    except MediaError as error:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, "Upload content failed media validation") from error
     db.commit()
-    return {"id": asset.id, "path": str(path)}
+    return asset
+
+
+def _safe_original_filename(filename: str | None) -> str:
+    try:
+        basename = Path((filename or "upload.bin").replace("\\", "/")).name
+    except (OSError, ValueError):
+        basename = "upload.bin"
+    sanitized = "".join(
+        character if character.isprintable() and character not in {"/", "\\"} else "_"
+        for character in basename
+    ).strip()
+    if sanitized in {"", ".", ".."}:
+        sanitized = "upload.bin"
+    return sanitized[:255]

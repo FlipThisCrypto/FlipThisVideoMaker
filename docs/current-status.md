@@ -1,6 +1,6 @@
 # FlipThisVideoMaker Current Status
 
-**Status date:** 2026-07-12  
+**Status date:** 2026-07-20
 **Repository:** `FlipThisCrypto/FlipThisVideoMaker`
 **Truthful status:** the deterministic CPU mock vertical slice, resumable post-processing stages,
 advanced media QA, browser workflow, cancellation, heartbeat, and GPU-admission reliability boundary
@@ -9,17 +9,18 @@ handoff point; resume from the final sections rather than relying on chat histor
 
 ## Durable stopping point
 
-The next final-media phase has been reconnoitred but intentionally not started. No partial API,
-worker, pipeline, or frontend contract exists at this checkpoint. ADR 0009 records the accepted
-cross-layer design for a versioned finalization execution snapshot, server-verified background-music
-Assets, immutable assembly/audio/subtitle stages, and the required test matrix.
+The final-media phase in ADR 0009 is implemented and exercised. Project render Jobs capture a
+versioned immutable finalization snapshot; background music is selected by project-owned Asset ID and
+revalidated before execution; completed assembly, audio, and subtitle stages retain immutable Asset
+provenance; and the React render form exposes subtitle, loudness, and music controls. Sidecar remains
+the compatibility default.
 
-Resume by implementing `config/render_finalization.py` and its contract tests first. Then extend the
-existing `ProjectRenderRequest` and render Job payload, worker parser, `MockPipeline` final assembly,
-and `ProjectEditor` render form in that order. Do not create a parallel settings system or accept
-client filesystem paths. Preserve the current sidecar/no-normalization/no-music behavior until the
-new non-default modes have focused integration coverage, then run the full validation matrix before
-the next phase commit.
+The product goal is now the first/last-frame generative-video program recorded in `MEMORY.md`. The
+current mock path remains deterministic test infrastructure and is not evidence of generative motion:
+its video stage is an FFmpeg transition between still frames. The next phase must introduce explicit
+generation-method categories, a versioned Asset-ID-based first/last-frame request/result contract,
+durable clip-chain lineage, exact 10-second/60-fps/600-frame delivery QA, and a serious provider
+integration. Do not promote the mock transition to a production capability.
 
 ## Exercised milestone
 
@@ -107,8 +108,8 @@ automatic fallback because its structured OOM and VRAM-release behavior has not 
 - FFmpeg media inspection, true last-frame extraction, transition assembly, black/freeze/silence
   detection, and final validation.
 - Standalone, tested FFmpeg finalization utilities cover soft subtitle muxing, subtitle burning,
-  two-pass EBU R128 loudness normalization, and optional looped/ducked music. These utilities are not
-  yet exposed through render jobs or the web render form.
+  two-pass EBU R128 loudness normalization, and optional looped/ducked music. These utilities are
+  exercised through immutable render-job snapshots and the web render form.
 
 ### Implemented/configured, not exercised against real backends
 
@@ -154,7 +155,7 @@ candidate-count settings. A maintained Playwright specification and isolated lau
 Frontend lint, Vitest, TypeScript, production build, and that browser workflow pass.
 
 Still missing: drag-and-drop ordering (accessible move controls are present), administrator provider
-settings editing, manual shot start/end-frame replacement, and richer render/finalization options.
+settings editing, manual shot start/end-frame replacement, and the generative chain workflow.
 
 ## Specification phase/gap map
 
@@ -164,7 +165,7 @@ settings editing, manual shot start/end-frame replacement, and richer render/fin
 | 2 — Domain/job engine | Persistent queue/retry, atomic terminal states, profile snapshots, typed same-lock OOM fallback, heartbeats, and GPU admission run | PostgreSQL claims, job leases, and configured concurrency |
 | 3 — Mock pipeline | Required four-shot MP4, continuity, subtitles, manifest, assets, reruns, conditional lip-sync, and requested interpolation run | Multiple-candidate generation in one render is not implemented |
 | 4 — UI | Maintained Playwright workflow plus project/story/character/voice/scene/shot/candidate/job/render controls run | Provider settings, manual keyframe replacement, and richer render controls |
-| 5 — Media/continuity | Frame extraction, hard/shared/crossfade assembly, thumbnail/contact sheet, black/freeze/silence QA, and standalone finalization utilities run | Wire normalize/music/subtitle mux-burn controls into render jobs; real interpolation bridges |
+| 5 — Media/continuity | Frame extraction, hard/shared/crossfade assembly, thumbnail/contact sheet, black/freeze/silence QA, and immutable normalize/music/subtitle finalization run | Exact CFR/frame-count and boundary-similarity QA; real interpolation bridges |
 | 6 — Live backends | Planner protocol tests and adapter/config boundaries exist | Complete protocol fixtures and real ComfyUI/WanGP/Ollama exercise |
 | 7 — Linux operations | API and CPU/GPU worker process lifecycle run; scripts/systemd templates exist | Real CUDA/model workload and long-run operations evidence |
 | 8 — Validation | Matrix below passes locally; GitHub Actions run `29207968290` passed | Real backend and CUDA workload evidence |
@@ -179,7 +180,7 @@ settings editing, manual shot start/end-frame replacement, and richer render/fin
 | `uv run ruff check .` | Passed |
 | `uv run ruff format --check .` | Passed |
 | `uv run mypy src` | Passed in strict mode |
-| `uv run pytest` | 95 passed |
+| `uv run pytest` | 117 passed |
 | `uv run flipthis-smoke` | Passed with isolated Alembic database |
 | Final `ffprobe` | 31.25 s, H.264 854×480/24 fps, AAC 48 kHz stereo |
 | API real-process health | HTTP 200; clean SIGINT shutdown |
@@ -189,9 +190,9 @@ settings editing, manual shot start/end-frame replacement, and richer render/fin
 | GPU discovery/admission | Two independent RTX 4070s discovered; per-device admission tests pass |
 | `pnpm install --frozen-lockfile` | Passed; `pnpm-lock.yaml` exists |
 | `pnpm lint` | Passed with no warnings |
-| `pnpm test` | 9 passed |
+| `pnpm test` | 11 passed |
 | `pnpm build` | Passed |
-| `pnpm e2e` | Passed in Chromium through character/voice, render, and isolated regeneration |
+| `./scripts/e2e.sh` | Passed in Chromium through finalization controls, render, and isolated regeneration |
 | Public exposure sweep | No credentials, private assets, generated media, or user-owned skills staged |
 | User-owned skills preservation | `skills.7z` SHA-256 unchanged; nested working content/status preserved |
 
@@ -203,8 +204,8 @@ settings editing, manual shot start/end-frame replacement, and richer render/fin
 3. Configured `max_concurrent_jobs` is reported but not enforced; each current worker loop is serial.
 4. A stale heartbeat is deliberately not a job lease. Automatic orphan reconciliation/requeueing is
    absent because it could duplicate an external generation process.
-5. Audio normalization/mixing and subtitle mux/burn are tested as standalone utilities but are not
-   wired into render-job/API/UI options. Transition variants beyond the exercised set remain absent.
+5. Audio normalization/mixing and subtitle mux/burn are exercised through the render-job/API/UI path.
+   Transition variants beyond the exercised set remain absent.
 6. Authentication is not implemented. The default localhost bind must not be exposed publicly as-is.
 7. No real model backend or GPU workload has been run, so model VRAM behavior and provider protocols
    remain unverified.
@@ -214,9 +215,8 @@ settings editing, manual shot start/end-frame replacement, and richer render/fin
 
 ## Next execution order
 
-1. Wire the tested finalization utilities into immutable render stages and expose subtitle mode,
-   loudness normalization, and optional music/ducking through the versioned render-job contract in
-   ADR 0009 and the existing UI.
+1. Implement the first/last-frame generative-video contract, durable chain lineage, exact delivery
+   QA, and a current production provider selected from verified primary documentation.
 2. Implement audio-measured speaking-shot duration, multi-candidate render generation, and manual
    planned start/end-frame upload or replacement without rebuilding completed work.
 3. Finish administrator provider/settings controls and successful-command fixtures for generic CLI

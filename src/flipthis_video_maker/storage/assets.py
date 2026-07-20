@@ -22,11 +22,12 @@ def register_asset(
     seed: int | None = None,
     parents: list[str] | None = None,
     generation_parameters: dict[str, Any] | None = None,
+    mime_type: str | None = None,
     cancel_requested: Callable[[], bool] | None = None,
 ) -> Asset:
     info = (
         probe(path, cancel_requested=cancel_requested)
-        if path.suffix.lower() in {".mp4", ".wav", ".mkv", ".mov"}
+        if path.suffix.lower() in {".mp3", ".mp4", ".wav", ".mkv", ".mov"}
         else {}
     )
     video: dict[str, Any] = next(
@@ -43,7 +44,8 @@ def register_asset(
         shot_id=shot_id,
         type=kind,
         file_path=str(path),
-        mime_type={
+        mime_type=mime_type
+        or {
             ".png": "image/png",
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",
@@ -52,6 +54,8 @@ def register_asset(
             ".mp4": "video/mp4",
             ".srt": "application/x-subrip",
             ".json": "application/json",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
         }.get(path.suffix.lower(), "application/octet-stream"),
         checksum=checksum(path),
         width=video.get("width", image_width),

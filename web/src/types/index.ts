@@ -27,6 +27,39 @@ export interface RenderProfileCatalog {
   default_profile: string;
   profiles: RenderProfile[];
 }
+export type SubtitleMode = "sidecar" | "soft" | "burned";
+export interface SubtitleFinalizationSettings {
+  mode: SubtitleMode;
+  language: string;
+  title: string;
+  default: boolean;
+  forced: boolean;
+}
+export interface AudioFinalizationSettings {
+  normalize: boolean;
+  integrated_lufs: number;
+  loudness_range_lu: number;
+  true_peak_dbfs: number;
+}
+export interface MusicFinalizationSettings {
+  asset_id: string;
+  gain_db: number;
+  loop: boolean;
+  threshold: number;
+  ratio: number;
+  attack_ms: number;
+  release_ms: number;
+}
+export interface RenderFinalizationRequest {
+  version: 1;
+  subtitle: SubtitleFinalizationSettings;
+  audio: AudioFinalizationSettings;
+  music: MusicFinalizationSettings | null;
+}
+export interface ProjectRenderRequest {
+  render_profile: string;
+  finalization: RenderFinalizationRequest;
+}
 export interface RenderProfileExecution {
   version: 1;
   requested_profile: string;
@@ -184,6 +217,10 @@ export interface Asset {
   width: number | null;
   height: number | null;
   duration: number | null;
+  frame_rate?: number | null;
+  source_provider?: string;
+  generation_parameters?: Record<string, unknown>;
+  created_at?: string;
 }
 export interface Candidate {
   id: string;
