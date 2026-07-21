@@ -91,8 +91,7 @@ operator retry; pause/cancel and process restarts retain a reconcilable state.
 
 ## Current execution status
 
-The deterministic CPU mock path and deterministic two-clip category-5 orchestration fixture are
-exercised. LTX-2.3 Pro, Luma Ray 3.2, Practical-RIFE 4.25, and LatentSync 1.5 adapters are implemented
-with protocol/argv fixtures but unexercised against their real services/runtimes. Two RTX 4070
-devices are discoverable and their worker processes have been started independently, but no CUDA
-generation, interpolation, or lip-sync workload has been exercised.
+The deterministic CPU mock path and two-clip orchestration fixture are exercised. Local Wan2.2 FLF
+generation and Practical-RIFE 4.25 interpolation are exercised on GPU 1; their first delivery is
+technically exact and passes boundary QA but remains rejected by visual QA. LatentSync 1.5 remains
+implemented but unexercised. The two RTX 4070 devices are independent; no pooled-memory claim is made.

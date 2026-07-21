@@ -64,8 +64,9 @@ encode. Delivery QA requires exactly 10.000 seconds, 60 fps, and 600 decoded fra
 duplication is not an accepted production interpolation method. The 60-fps file must never be called
 "600 native AI-generated frames."
 
-Practical-RIFE is MIT-licensed and documents model 4.25 for video inference. Its adapter is
-**Implemented, unexercised** against the external runtime. Source:
+Practical-RIFE is MIT-licensed and recommends model 4.25 for most scenes. Its adapter and official
+weights are **Exercised** on GPU 1. The 8× run converted 81 frames to 641 unique frames at 60 fps in
+19.95 seconds; endpoint-preserving normalization produced exactly 600 CFR frames. Source:
 [Practical-RIFE](https://github.com/hzwer/Practical-RIFE).
 
 ## Lip-sync decision

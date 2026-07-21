@@ -4,7 +4,7 @@
 
 - Chain contract, migration, API/UI, lineage, exact delivery QA, shared-boundary assembly, HLS
   publication, local Wan protocol fixtures, and deterministic two-clip integration: **Exercised**.
-- Local Wan runtime health: **Exercised**. Practical-RIFE and LatentSync: **Implemented, unexercised**.
+- Local Wan and Practical-RIFE runtimes: **Exercised**. LatentSync: **Implemented, unexercised**.
 - Immutable next-target request/Job/Asset generation and deterministic/CLI fixtures: **Exercised**.
 - Playback-aware replenishment with deterministic target/video providers: **Exercised**.
 - Real target-image model and sustainable real-time replenishment: **Implemented, unexercised**.
@@ -47,6 +47,7 @@ Install and start the isolated open-source runtime; no API key is used:
 ```bash
 ./scripts/install-wan22-flf.sh /absolute/external/runtime/root
 ./scripts/run-wan22-flf.sh /absolute/external/runtime/root gpu1 8189
+./scripts/install-practical-rife.sh /absolute/external/rife/root
 ```
 
 The configured provider owns GPU 1 and port 8189. Its live health probe must validate the native FLF
@@ -57,10 +58,9 @@ an administrator-installed image model that accepts the prior boundary as a real
 The command is model-specific and therefore intentionally not guessed in repository configuration.
 Enable it only after `/api/v1/providers/health` succeeds.
 
-Install Practical-RIFE outside the core environment at the administrator-owned paths recorded in
-`config/providers.yaml`. Use the official Practical-RIFE repository, its Python ≤3.11-compatible
-environment, and the 4.25 model directory. Then enable `rife-local`. The worker's
-`CUDA_VISIBLE_DEVICES` is inherited; the adapter does not invent a device flag.
+Install Practical-RIFE with the pinned installer, copy its printed paths into `config/providers.yaml`,
+and enable `rife-local`. The worker's `CUDA_VISIBLE_DEVICES` is inherited; the adapter does not
+invent a device flag.
 
 For optional lip sync, install the official LatentSync repository outside the core environment,
 install the 1.5 checkpoint/config plus the official SyncNet checkpoint, update the five configured
@@ -71,13 +71,11 @@ paths, and enable `latentsync-local`. Version 1.6 is not selected because the of
 
 Prerequisites:
 
-- `LTXV_API_KEY` or `LUMA_AGENTS_API_KEY` with funded account;
-- enabled hosted provider and successful `/api/v1/providers/health` result;
+- running local Wan2.2 endpoint with successful `/api/v1/providers/health` result;
 - Practical-RIFE 4.25 runtime/weights at configured paths;
 - one running GPU worker for the selected queue;
 - two consent-safe start/target images, plus optional 10-second dialogue audio;
-- approximately 0.8 USD per 10-second 1080p LTX-2.3 Pro attempt at the reviewed list price, with
-  additional budget for retries.
+- sufficient local disk, system RAM, and generation time for retries.
 
 ```bash
 uv run alembic upgrade head

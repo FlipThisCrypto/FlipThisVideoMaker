@@ -4,8 +4,8 @@
 
 - Deterministic CPU mock studio and finalization workflow.
 - Versioned category-5 request/result contract and Alembic chain persistence.
-- LTX-2.3 Pro and Luma Ray 3.2 hosted protocol adapters.
-- Practical-RIFE 4.25 and LatentSync 1.5 isolated child-process adapters.
+- Local Wan2.2 FLF and Practical-RIFE 4.25 exercised provider paths; legacy hosted adapters disabled.
+- LatentSync 1.5 isolated child-process adapter.
 - Exact 10-second/60-fps/600-frame delivery and boundary/freeze/snap QA.
 - Actual-final-frame successor lineage, restart/retry, shared-boundary assembly, atomic HLS buffer,
   and full React workflow.
@@ -20,10 +20,9 @@ These are fixture/integration-proven. Real model quality remains blocked.
 
 ## Next One Thing
 
-Run one live LTX-2.3 Pro two-clip acceptance with Practical-RIFE 4.25 on one RTX 4070. Do not expand
-features first. Preserve native/delivery/contact-sheet/report artifacts and record latency, cost,
-native FPS, peak VRAM, endpoint metrics, and the assembled shared boundary. Fix visual or contract
-failures until the acceptance threshold passes.
+Produce a local Wan2.2 native clip that passes the no-morph visual gate, then run the real two-clip
+acceptance with the exercised RIFE stage. Preserve native/delivery/contact-sheet/report artifacts and
+record latency, native FPS, peak VRAM, endpoint metrics, and the assembled shared boundary.
 
 ## Following phases
 

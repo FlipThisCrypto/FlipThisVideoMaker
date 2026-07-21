@@ -104,6 +104,10 @@ def normalize_interpolated_delivery(
         raise ValueError("Interpolator output frame rate does not match requested delivery FPS")
     if input_facts["decoded_frame_count"] < expected_frames:
         raise ValueError("Interpolator returned too few decoded frames for exact delivery")
+    selection = _uniform_frame_selection(
+        input_facts["decoded_frame_count"],
+        expected_frames,
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(f".{output.stem}-{uuid.uuid4().hex}.partial{output.suffix}")
     try:
@@ -118,13 +122,17 @@ def normalize_interpolated_delivery(
                 "-map",
                 "0:v:0",
                 "-vf",
-                f"trim=end_frame={expected_frames},setpts=N/({delivery_fps}*TB)",
+                f"{selection}setpts=N/({delivery_fps}*TB)",
                 "-frames:v",
                 str(expected_frames),
                 "-fps_mode",
                 "cfr",
                 "-c:v",
                 "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "12",
                 "-pix_fmt",
                 "yuv420p",
                 "-movflags",
@@ -140,6 +148,22 @@ def normalize_interpolated_delivery(
         partial.unlink(missing_ok=True)
         raise
     return output
+
+
+def _uniform_frame_selection(input_frames: int, output_frames: int) -> str:
+    """Drop surplus internal frames evenly while preserving both boundary frames."""
+    if input_frames < output_frames or output_frames < 2:
+        raise ValueError("Frame selection requires at least two output frames and enough input")
+    surplus = input_frames - output_frames
+    if surplus == 0:
+        return ""
+    dropped = {
+        round(position * (input_frames - 1) / (surplus + 1)) for position in range(1, surplus + 1)
+    }
+    if len(dropped) != surplus or 0 in dropped or input_frames - 1 in dropped:
+        raise ValueError("Could not derive an endpoint-preserving frame selection")
+    predicates = "+".join(f"eq(n\\,{index})" for index in sorted(dropped))
+    return f"select=not({predicates}),"
 
 
 def mux_exact_delivery_audio(

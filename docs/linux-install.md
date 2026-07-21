@@ -31,3 +31,18 @@ The launcher binds loopback only, exposes exactly one physical GPU, and uses max
 Configure a second endpoint for GPU 0 rather than making one process see both cards. A runtime is
 healthy only after its live node/model/device probe passes. Boundary uploads remain in the external
 ComfyUI input directory and must follow the workstation's private-media retention policy.
+
+## Practical-RIFE 4.25 delivery runtime
+
+Practical-RIFE requires Python 3.11 or earlier. The installer pins the upstream Git commit, Python
+packages, official 4.25 archive, and all four model-file checksums outside Git:
+
+```bash
+./scripts/install-practical-rife.sh /srv/flipthis/providers/practical-rife
+```
+
+Copy the three paths printed by the installer into the `rife-local` entry in
+`config/providers.yaml`, then set that entry to `enabled: true`. The worker's
+`CUDA_VISIBLE_DEVICES` mapping determines the one physical GPU used; the adapter does not invent a
+model-specific device flag. Live health verifies Python imports, CUDA availability, and exact model
+checksums rather than treating configured paths as proof of readiness.

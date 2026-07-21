@@ -1,10 +1,13 @@
 import asyncio
+import hashlib
+import math
 import shutil
 import subprocess
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from flipthis_video_maker.config.settings import get_settings
 from flipthis_video_maker.contracts.video_generation import GenerationCategory
 from flipthis_video_maker.media.ffmpeg import (
     MediaCancelled,
@@ -20,6 +23,13 @@ from flipthis_video_maker.providers.base.errors import (
     ProviderOutOfMemoryError,
 )
 from flipthis_video_maker.providers.base.models import Capability, ProviderInfo
+
+MODEL_FILES = {
+    "flownet.pkl": "6615790efd627772917205db291f51cd392528a157ecbb2ecaeec3bff8eb6de2",
+    "IFNet_HDv3.py": "655b4c772b037967b86c2dd31c8fa3b5323b79dd9a0e0088708d89149bbc8a32",
+    "RIFE_HDv3.py": "81bbd0648e499de79e44768d284005d9d57d0f6eb7c30adae407f22675055730",
+    "refine.py": "0c5698b4a05b9f6ab551740575c1c35e248e5b1829bab6445186081ebe15f032",
+}
 
 
 class RifeCliInterpolationProvider:
@@ -67,12 +77,38 @@ class RifeCliInterpolationProvider:
 
     async def health(self) -> dict[str, object]:
         info = self.info()
+        model_verified = info.available and _model_manifest_verified(self.model_directory)
+        runtime_verified = False
+        cuda_available = False
+        if info.available and model_verified:
+            try:
+                completed = await asyncio.to_thread(
+                    run,
+                    [
+                        str(self.python),
+                        "-c",
+                        (
+                            "import cv2,numpy,skvideo.io,torch;"
+                            "print('cuda=' + str(torch.cuda.is_available()).lower())"
+                        ),
+                    ],
+                    30,
+                    cwd=self.script.parent,
+                )
+                runtime_verified = True
+                cuda_available = "cuda=true" in completed.stdout
+            except (MediaError, subprocess.TimeoutExpired, OSError):
+                pass
+        healthy = info.available and model_verified and runtime_verified and cuda_available
         return {
-            "ok": info.available,
-            "status": "ready" if info.available else "missing_external_runtime",
+            "ok": healthy,
+            "status": "ready" if healthy else "missing_or_invalid_external_runtime",
             "python": shutil.which(str(self.python)) is not None or self.python.is_file(),
             "script": self.script.is_file(),
             "model_directory": self.model_directory.is_dir(),
+            "model_verified": model_verified,
+            "runtime_verified": runtime_verified,
+            "cuda_available": cuda_available,
         }
 
     async def process(self, video: Path, output: Path, *, target_fps: int) -> Path:
@@ -87,19 +123,57 @@ class RifeCliInterpolationProvider:
             )
         if target_fps < 1 or target_fps > 120:
             raise ValueError("RIFE target FPS must be between 1 and 120")
+        try:
+            input_facts = inspect_frame_timing(video, cancel_requested=self.cancel_requested)
+        except MediaCancelled as error:
+            raise ProviderExecutionError(
+                provider_id=self.provider_id,
+                operation="inspect_interpolation_input",
+                failure_kind=ProviderFailureKind.CANCELLED,
+                backend_code="input_inspection_cancelled",
+            ) from error
+        except subprocess.TimeoutExpired as error:
+            raise ProviderExecutionError(
+                provider_id=self.provider_id,
+                operation="inspect_interpolation_input",
+                failure_kind=ProviderFailureKind.TIMEOUT,
+                retryable=True,
+                backend_code="input_inspection_timeout",
+            ) from error
+        except (MediaError, ValueError) as error:
+            raise ProviderExecutionError(
+                provider_id=self.provider_id,
+                operation="inspect_interpolation_input",
+                failure_kind=ProviderFailureKind.INVALID_INPUT,
+                backend_code="invalid_native_video",
+            ) from error
+        native_fps = input_facts["average_frame_rate"]
+        if native_fps <= 0 or target_fps <= native_fps:
+            raise ValueError("RIFE target FPS must be greater than the measured native FPS")
+        multiplier = math.ceil(target_fps / native_fps)
+        if multiplier < 2 or multiplier > 16:
+            raise ValueError("RIFE interpolation multiplier must be between 2 and 16")
+        minimum_frames = (
+            math.ceil((input_facts["decoded_frame_count"] - 1) * target_fps / native_fps) + 1
+        )
         output.parent.mkdir(parents=True, exist_ok=True)
-        partial = output.with_name(f".{output.stem}-{uuid.uuid4().hex}.partial{output.suffix}")
+        token = uuid.uuid4().hex
+        partial = output.with_name(f".{output.stem}-{token}.partial{output.suffix}")
+        workspace = output.parent / f".rife-work-{token}"
+        workspace.mkdir()
+        frame_directory = workspace / "vid_out"
         args = [
             str(self.python),
             str(self.script),
             "--video",
             str(video),
-            "--output",
-            str(partial),
             "--model",
             str(self.model_directory),
             "--fps",
             str(target_fps),
+            "--multi",
+            str(multiplier),
+            "--png",
         ]
         try:
             await asyncio.to_thread(
@@ -107,24 +181,90 @@ class RifeCliInterpolationProvider:
                 args,
                 self.timeout_seconds,
                 cancel_requested=self.cancel_requested,
+                cwd=workspace,
             )
-            if not partial.is_file():
+            frame_paths = sorted(frame_directory.glob("*.png"))
+            if len(frame_paths) < minimum_frames or any(
+                path.name != f"{index:07d}.png" for index, path in enumerate(frame_paths)
+            ):
                 raise ProviderExecutionError(
                     provider_id=self.provider_id,
                     operation="interpolate",
                     failure_kind=ProviderFailureKind.OUTPUT_INVALID,
-                    backend_code="missing_output",
+                    backend_code="missing_or_noncontiguous_png_frames",
                 )
+            # Practical-RIFE's PNG route converts every decoded source frame through RGB.
+            # Splice only its interior frames between boundaries decoded directly from the
+            # immutable native video. Keeping those boundaries in FFmpeg's YUV domain avoids
+            # an otherwise measurable second colour conversion at conditioned endpoints.
+            last_native_frame = input_facts["decoded_frame_count"] - 1
+            last_interpolated_frame = len(frame_paths) - 1
+            filter_complex = (
+                "[0:v]select=eq(n\\,0),"
+                f"setpts=N/({target_fps}*TB)[first];"
+                f"[1:v]select=between(n\\,1\\,{last_interpolated_frame - 1}),"
+                f"setpts=N/({target_fps}*TB)[middle];"
+                f"[0:v]select=eq(n\\,{last_native_frame}),"
+                f"setpts=N/({target_fps}*TB)[last];"
+                "[first][middle][last]concat=n=3:v=1:a=0[outv]"
+            )
+            await asyncio.to_thread(
+                run,
+                [
+                    get_settings().ffmpeg_path,
+                    "-y",
+                    "-v",
+                    "error",
+                    "-i",
+                    str(video),
+                    "-framerate",
+                    str(target_fps),
+                    "-start_number",
+                    "0",
+                    "-i",
+                    str(frame_directory / "%07d.png"),
+                    "-filter_complex",
+                    filter_complex,
+                    "-map",
+                    "[outv]",
+                    "-frames:v",
+                    str(len(frame_paths)),
+                    "-r",
+                    str(target_fps),
+                    "-fps_mode",
+                    "cfr",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    "8",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                    "-an",
+                    str(partial),
+                ],
+                self.timeout_seconds,
+                cancel_requested=self.cancel_requested,
+            )
             facts = inspect_frame_timing(
                 partial,
                 cancel_requested=self.cancel_requested,
             )
-            if abs(facts["average_frame_rate"] - target_fps) > 0.05:
+            if (
+                abs(facts["average_frame_rate"] - target_fps) > 0.05
+                or not facts["constant_frame_rate"]
+                or facts["decoded_frame_count"] < minimum_frames
+                or facts["width"] != input_facts["width"]
+                or facts["height"] != input_facts["height"]
+            ):
                 raise ProviderExecutionError(
                     provider_id=self.provider_id,
                     operation="interpolate",
                     failure_kind=ProviderFailureKind.OUTPUT_INVALID,
-                    backend_code="wrong_frame_rate",
+                    backend_code="invalid_interpolated_timing_or_resolution",
                 )
             partial.replace(output)
         except MediaCancelled as error:
@@ -168,6 +308,8 @@ class RifeCliInterpolationProvider:
         except BaseException:
             partial.unlink(missing_ok=True)
             raise
+        finally:
+            shutil.rmtree(workspace)
         return output
 
     async def cleanup_after_oom(
@@ -180,6 +322,25 @@ class RifeCliInterpolationProvider:
             retry_safe=True,
             action_code="child_process_reaped_and_partial_removed",
         )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _model_manifest_verified(model_directory: Path) -> bool:
+    try:
+        return all(
+            (model_directory / filename).is_file()
+            and _sha256(model_directory / filename) == checksum
+            for filename, checksum in MODEL_FILES.items()
+        )
+    except OSError:
+        return False
 
 
 __all__ = ["RifeCliInterpolationProvider"]

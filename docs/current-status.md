@@ -10,7 +10,7 @@
 and exercised with deterministic CPU protocol/integration fixtures. A local Wan2.2 I2V-A14B FP8
 adapter is implemented and its isolated ComfyUI runtime, health probe, native generation, history
 collection, and media inspection are exercised on GPU 1. The first visual artifact was rejected.
-Practical-RIFE 4.25 and LatentSync 1.5 integrations remain unexercised against real weights.
+Practical-RIFE 4.25 is exercised with official weights on GPU 1; LatentSync 1.5 remains unexercised.
 Production visual quality is therefore not yet proven.
 Continuity-aware target-frame Jobs are exercised with deterministic and safe CLI fixtures; no real
 target-image model is installed. A durable playback-aware replenishment controller is exercised
@@ -90,11 +90,12 @@ remain disabled compatibility code and are outside the local-only policy.
 
 - Provider-native output is immutable and retains measured native FPS. The system never claims the
   600-frame delivery is native AI output unless measured as such.
-- Practical-RIFE 4.25 has a safe administrator-path argv adapter with cancellation, timeout, atomic
-  output, exact-FPS validation, configured numeric OOM classification, redaction, and cleanup. Its
-  external runtime is not installed/exercised here.
-- Production delivery rejects frame duplication. It requires enough interpolated frames, trims to an
-  exact timeline, encodes CFR H.264, and proves duration/FPS/decoded count through ffprobe/decoding.
+- Practical-RIFE 4.25 uses a safe administrator-path argv adapter with cancellation, timeout,
+  checksummed health, isolated lossless-PNG workspaces, atomic output, exact-FPS/count validation,
+  configured numeric OOM classification, redaction, and verified cleanup. It is **Exercised**.
+- Production delivery rejects frame duplication. It evenly removes surplus internal interpolated
+  frames while retaining both endpoints, keeps native boundaries in FFmpeg's YUV domain to avoid
+  an RGB round-trip, encodes CFR H.264 High/yuv420p, and proves duration/FPS/decoded count.
 - QA extracts frames 0, 1, 60, 150, 300, 450, 598, and 599; records normalized MAE, RMSE, global
   SSIM, perceptual dHash, final-step/snap evidence, exact duplicate/freeze evidence, timing, contact
   sheet, and a JSON report. LPIPS and privacy-reviewed identity similarity are truthfully marked
@@ -175,8 +176,7 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
   and admission. Two RTX 4070 12,282 MB cards were previously discovered. No pooled VRAM, NVLink, or
   model-parallel claim is made.
 - RIFE/LatentSync inherit the one worker-visible GPU and never invent an upstream device flag.
-- A Wan2.2 FLF CUDA workload has been attempted on GPU 1; exact outcome is in the validation matrix.
-  RIFE and LatentSync remain unmeasured.
+- Wan2.2 FLF and RIFE CUDA workloads were exercised on GPU 1. LatentSync remains unmeasured.
 
 ## Validation matrix
 
@@ -184,26 +184,29 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
 | Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0006`, downgrade to `0005`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, revision `0006` |
-| Ruff / formatting / strict MyPy | Passed; 107 files formatted, 67 source files type-checked |
+| Ruff / formatting / strict MyPy | Passed; 108 files formatted, 67 source files type-checked |
 | Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
 | Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
-| Complete pytest | Passed; 176 tests in 116.22 seconds |
+| Complete pytest | Passed; 180 tests in 114.68 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
 | Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.2 seconds |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.4 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Local Wan2.2 health | Passed on ComfyUI v0.9.2, GPU 1 isolated as the sole visible RTX 4070, all required nodes/models present |
 | Local 24-fps generation | Failed honestly: 241 frames at 854×480 exhausted the GPU's 11.6 GiB usable VRAM under both low and maximum offload; structured OOM classification passed and no output was published |
 | Local 8-fps generation | Completed in 16m40s: 81 decoded unique frames, CFR 8 fps, 10.125 s, 848×480, no adjacent duplicates; effective real-time factor 98.8× slower than playback. Temporary artifact SHA-256 `7e3ff29df67c21b22716787e013819be51d246277d45e12d3f4c77eaf96cf083` |
 | Native boundary evidence | Start MAE 0.0191 / SSIM 0.9960; end MAE 0.0268 / SSIM 0.9969; last-step MAE 0.0143 / SSIM 0.9158 |
+| Practical-RIFE 4.25 | Passed live health/checksums and corrected 8× interpolation on GPU 1 in 19.95 s: 81 input frames to 641 unique CFR 60-fps frames, no adjacent duplicates, workspace removed, GPU returned to 18 MiB used |
+| Exact delivery | Passed technical timing: H.264 High/yuv420p, 10.000 s, CFR 60 fps, exactly 600 unique decoded frames; uniformly dropped 41 internal frames and retained decoded native frames 0 and 80 as delivery frames 0 and 599. SHA-256 `534f19e5ecde2b0c1ecdcb1e45172a654851ec252c7389737c336ae05d6b7b0a` |
+| Delivery boundary QA | **Passed:** start MAE 0.0191 / SSIM 0.9960; end MAE 0.0318 / SSIM 0.9966; penultimate-to-final MAE 0.0016; no snap or duplicate/frozen run detected |
 | Visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; not evidence of live-action quality or a production pass |
 
 ## Known limitations and blockers
 
 1. The Definition of Done's real visual acceptance is not met. The first native artifact converged
    on both boundaries but visibly slid/morphed and duplicated its subject near the ending.
-2. Practical-RIFE and LatentSync are not installed at configured paths. CUDA VRAM/runtime/concurrency,
-   cleanup, and quality are unmeasured.
+2. LatentSync is not installed at its configured path. RIFE was exercised only on GPU 1; independent
+   GPU 0 and simultaneous dual-queue behavior remain unmeasured.
 3. LPIPS and privacy-reviewed identity similarity are not installed. Current perceptual evidence is
    dHash plus SSIM/MAE/RMSE.
 4. ComfyUI boundary uploads remain in its local external input directory and require retention cleanup.
@@ -217,10 +220,10 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 ## Next execution order
 
 1. Improve local Wan conditioning/input strategy until a native artifact passes the no-morph visual
-   gate, then install/enable Practical-RIFE and run the documented real two-clip acceptance.
+   gate, then run the documented real two-clip acceptance with the exercised RIFE stage.
 2. Fix every real-output QA deficiency, prioritizing natural end convergence and shared-boundary
    continuity; evaluate provider-native retake/bridge remediation if needed.
-3. Exercise one independent RIFE workload on each RTX 4070, then LatentSync 1.5 on eligible dialogue;
+3. Exercise RIFE on GPU 0 and simultaneous independent queues, then LatentSync 1.5 on eligible dialogue;
    record peak VRAM and cleanup behavior.
 4. Add LPIPS and a privacy-reviewed opt-in identity metric as isolated QA providers.
 5. Measure the replenishment controller with the real two-clip run, then tune the buffer target and

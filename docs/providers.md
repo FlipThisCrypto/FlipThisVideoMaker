@@ -61,14 +61,19 @@ fixtures pass.
 
 ### Practical-RIFE 4.25
 
-`rife-local` executes the official `inference_video.py --video ... --output ... --model ... --fps`
-shape as an argument array with no shell. Runtime/model paths are administrator-controlled and model
-dependencies stay outside Python 3.12 core/CI. Output is attempt-specific, validated, and atomically
-moved. Cancellation kills/reaps the child. Only configured numeric exit codes may become OOM; raw
-stderr is not persisted.
+`rife-local` measures native timing, derives the required integer `--multi`, and executes the
+official `inference_video.py` in `--png` mode as an argument array with no shell. Every attempt owns
+a unique workspace, avoiding upstream `vid_out` collisions and bypassing its audio-transfer path.
+The lossless RIFE frame sequence must be contiguous and sufficient. FFmpeg splices only its interior
+frames between the immutable native video's decoded YUV boundaries, avoiding a second RGB/YUV
+round-trip at the conditioned endpoints, before a high-quality immutable H.264/yuv420p 60-fps
+intermediate is atomically published. Cancellation kills/reaps the child and removes partial work.
+Only configured numeric exit codes may become OOM; raw stderr is not persisted.
 
-RIFE is `frame_interpolation`, never generative video. Evidence: **Implemented, unexercised** against
-the external runtime; argv/atomic-output fixtures pass.
+When the integer multiplier produces surplus frames, finalization removes internal frames evenly
+while preserving the actual first and last frames. RIFE is `frame_interpolation`, never generative
+video. Evidence: **Exercised** with official 4.25 weights on GPU 1: 81 native frames became 641
+unique 60-fps frames in 19.95 seconds, then exactly 600 CFR frames with both endpoints retained.
 
 ### LatentSync 1.5
 

@@ -61,6 +61,7 @@ The selected generator uses only local open-source components:
 ```bash
 ./scripts/install-wan22-flf.sh /absolute/external/runtime/root
 ./scripts/run-wan22-flf.sh /absolute/external/runtime/root gpu1 8189
+./scripts/install-practical-rife.sh /absolute/external/rife/root
 ```
 
 Optional GPU workers use the logical-to-physical mappings in `config/workers.yaml`:
@@ -112,8 +113,9 @@ Use the [documentation map](docs/README.md) as the entry point for the full guid
 - **Planned:** no working protocol behavior exists yet.
 
 At present, deterministic planning/image/TTS/video providers and the CPU two-clip chain integration
-are exercised. The local Wan2.2 provider protocol and live health probe are exercised. Practical-RIFE
-4.25 and LatentSync 1.5 have tested argv integrations but have not been run against real weights. Ollama and
+are exercised. Local Wan2.2 generation and Practical-RIFE 4.25 interpolation have been run with real
+weights on GPU 1; exact delivery and boundary QA pass, but visual generation quality remains rejected.
+LatentSync 1.5 has a tested argv integration but has not been run against real weights. Ollama and
 OpenAI-compatible planner contracts have protocol tests. Generic CLI numeric OOM classification and
 partial cleanup have protocol fixtures, while successful media commands remain unexercised. ComfyUI
 and WanGP headless paths are implemented/configurable but still need complete protocol fixtures and

@@ -16,7 +16,7 @@ such as configured, protocol-tested, and exercised are intentionally distinct.
 | Generic CLI | image, TTS, video | Administrator argv arrays, never a shell | Implemented; protocol fixtures and live backend exercise missing |
 | Chatterbox / Qwen TTS / Index TTS | TTS and voice cloning | External CLI/service configuration | Prepared/planned |
 | FramePack / SkyReels / InfiniteTalk | video/avatar | External service or CLI adapters | Evaluated/planned; no verified category-5 contract selected |
-| Practical-RIFE 4.25 | temporal frame interpolation | External official CLI argv | Argv/atomic/cancellation/error behavior fixture-tested; runtime unexercised |
+| Practical-RIFE 4.25 | temporal frame interpolation | External official CLI argv | Runtime/model exercised on GPU 1; 641 unique 60-fps frames and exact endpoint-preserving 600-frame delivery |
 | LatentSync 1.5 | single-visible-face post-generation lip sync and SyncNet QA | External official CLI argv | Protocol/pipeline fixture-tested; weights/GPU unexercised |
 | Spatial upscalers | post-processing | Future isolated provider | Planned |
 
