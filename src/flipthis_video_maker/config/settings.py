@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
     provider_config: Path = Path("config/providers.yaml")
+    perceptual_metric_provider_id: str | None = None
     worker_config: Path = Path("config/workers.yaml")
     render_profile_config: Path = Path("config/render-profiles.yaml")
     worker_heartbeat_seconds: float = Field(default=5, gt=0)

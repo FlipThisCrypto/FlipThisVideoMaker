@@ -30,7 +30,7 @@ record latency, native FPS, peak VRAM, endpoint metrics, and the assembled share
    cleanup, and retry without assuming pooled VRAM.
 2. Exercise LatentSync 1.5 on the speaking/no-speaker/hidden-mouth/multiple-face/no-speech/skip matrix;
    retain only workflows with honest SyncNet and boundary evidence.
-3. Add isolated LPIPS and opt-in privacy-reviewed identity QA.
+3. Calibrate isolated LPIPS evidence and add opt-in privacy-reviewed identity QA.
 4. Use provider-native retake/extend or a true generative bridge when real outputs miss the target end;
    never use a visible morph or final-frame overwrite to pass.
 5. Exercise and tune the replenishment controller against measured real generation throughput; add

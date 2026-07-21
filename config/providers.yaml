@@ -54,6 +54,13 @@ providers:
     script: /opt/practical-rife/inference_video.py
     model_directory: /opt/practical-rife/train_log
     timeout_seconds: 1800
+  - id: lpips-local
+    kind: lpips
+    enabled: false
+    python: /opt/lpips/.venv/bin/python
+    script: ../scripts/lpips_metric.py
+    cache_directory: /opt/lpips/cache
+    timeout_seconds: 300
   - id: latentsync-local
     kind: latentsync
     enabled: false

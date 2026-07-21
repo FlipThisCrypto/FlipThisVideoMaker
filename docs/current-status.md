@@ -10,7 +10,8 @@
 and exercised with deterministic CPU protocol/integration fixtures. A local Wan2.2 I2V-A14B FP8
 adapter is implemented and its isolated ComfyUI runtime, health probe, native generation, history
 collection, and media inspection are exercised on GPU 1. The first visual artifact was rejected.
-Practical-RIFE 4.25 is exercised with official weights on GPU 1; LatentSync 1.5 remains unexercised.
+Practical-RIFE 4.25 is exercised with official weights on GPU 1, and local LPIPS 0.1/AlexNet boundary
+QA is exercised on CPU. LatentSync 1.5 remains unexercised.
 Production visual quality is therefore not yet proven.
 Continuity-aware target-frame Jobs are exercised with deterministic and safe CLI fixtures; no real
 target-image model is installed. A durable playback-aware replenishment controller is exercised
@@ -97,9 +98,9 @@ remain disabled compatibility code and are outside the local-only policy.
   frames while retaining both endpoints, keeps native boundaries in FFmpeg's YUV domain to avoid
   an RGB round-trip, encodes CFR H.264 High/yuv420p, and proves duration/FPS/decoded count.
 - QA extracts frames 0, 1, 60, 150, 300, 450, 598, and 599; records normalized MAE, RMSE, global
-  SSIM, perceptual dHash, final-step/snap evidence, exact duplicate/freeze evidence, timing, contact
-  sheet, and a JSON report. LPIPS and privacy-reviewed identity similarity are truthfully marked
-  unavailable in the lightweight environment.
+  SSIM, perceptual dHash, optional isolated LPIPS, final-step/snap evidence, exact duplicate/freeze
+  evidence, timing, contact sheet, and a JSON report. Privacy-reviewed identity similarity remains
+  truthfully unavailable.
 - Start acceptance is MAE ≤0.02 and SSIM ≥0.97. End acceptance is MAE ≤0.10, SSIM ≥0.80, and dHash
   similarity ≥0.80. A final SSIM jump over 0.15 or final-step MAE over 0.15 fails the no-snap check.
   Any failed check marks the clip degraded; degraded clips cannot be accepted.
@@ -184,13 +185,13 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
 | Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0006`, downgrade to `0005`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, revision `0006` |
-| Ruff / formatting / strict MyPy | Passed; 108 files formatted, 67 source files type-checked |
+| Ruff / formatting / strict MyPy | Passed; 112 files formatted, 69 source files type-checked |
 | Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
 | Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
-| Complete pytest | Passed; 180 tests in 114.68 seconds |
+| Complete pytest | Passed; 186 tests in 114.78 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
 | Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.4 seconds |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 23.6 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Local Wan2.2 health | Passed on ComfyUI v0.9.2, GPU 1 isolated as the sole visible RTX 4070, all required nodes/models present |
 | Local 24-fps generation | Failed honestly: 241 frames at 854×480 exhausted the GPU's 11.6 GiB usable VRAM under both low and maximum offload; structured OOM classification passed and no output was published |
@@ -199,6 +200,7 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Practical-RIFE 4.25 | Passed live health/checksums and corrected 8× interpolation on GPU 1 in 19.95 s: 81 input frames to 641 unique CFR 60-fps frames, no adjacent duplicates, workspace removed, GPU returned to 18 MiB used |
 | Exact delivery | Passed technical timing: H.264 High/yuv420p, 10.000 s, CFR 60 fps, exactly 600 unique decoded frames; uniformly dropped 41 internal frames and retained decoded native frames 0 and 80 as delivery frames 0 and 599. SHA-256 `534f19e5ecde2b0c1ecdcb1e45172a654851ec252c7389737c336ae05d6b7b0a` |
 | Delivery boundary QA | **Passed:** start MAE 0.0191 / SSIM 0.9960; end MAE 0.0318 / SSIM 0.9966; penultimate-to-final MAE 0.0016; no snap or duplicate/frozen run detected |
+| Local LPIPS 0.1/AlexNet | Passed live CPU health and strict output validation. Real delivery: start distance 0.04379, end 0.02790, identical-frame control approximately zero. Persisted temporary report SHA-256 `6adf832fcf462c6385d6d7682e6edf1dd978db05df80c3e1416af6225a4c3902` |
 | Visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; not evidence of live-action quality or a production pass |
 
 ## Known limitations and blockers
@@ -207,8 +209,9 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
    on both boundaries but visibly slid/morphed and duplicated its subject near the ending.
 2. LatentSync is not installed at its configured path. RIFE was exercised only on GPU 1; independent
    GPU 0 and simultaneous dual-queue behavior remain unmeasured.
-3. LPIPS and privacy-reviewed identity similarity are not installed. Current perceptual evidence is
-   dHash plus SSIM/MAE/RMSE.
+3. LPIPS is exercised but diagnostic pending representative threshold calibration. A privacy-reviewed
+   identity similarity provider is not installed. Torchvision's AlexNet pretrained-weight terms also
+   require intended-use review because torchvision disclaims blanket permission for pretrained models.
 4. ComfyUI boundary uploads remain in its local external input directory and require retention cleanup.
 5. Autonomous replenishment is exercised only with deterministic providers. Real provider latency,
    HLS browser support, buffer sizing, and sustainable real-time factor are not proven.
@@ -225,6 +228,7 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
    continuity; evaluate provider-native retake/bridge remediation if needed.
 3. Exercise RIFE on GPU 0 and simultaneous independent queues, then LatentSync 1.5 on eligible dialogue;
    record peak VRAM and cleanup behavior.
-4. Add LPIPS and a privacy-reviewed opt-in identity metric as isolated QA providers.
+4. Calibrate LPIPS on representative accepted/rejected local outputs and add a privacy-reviewed
+   opt-in identity metric as an isolated QA provider.
 5. Measure the replenishment controller with the real two-clip run, then tune the buffer target and
    add a cross-browser HLS client only if native playback evidence requires it.

@@ -90,6 +90,20 @@ are handled. LatentSync cannot deterministically select among multiple faces; th
 Evidence: **Implemented, unexercised** against weights/GPU. Official CLI/SyncNet argv and OOM cleanup
 fixtures plus a deterministic pipeline integration pass.
 
+### LPIPS 0.1 / AlexNet boundary QA
+
+`lpips-local` runs the official learned perceptual metric in an isolated CPU-only Python 3.11
+environment. Its repository-owned CLI accepts only two internally resolved image paths and emits
+strict versioned JSON. The adapter supplies a minimal environment, validates runtime/model identity,
+supports cancellation and timeout, redacts child failures, and persists both boundary distances in
+the ordinary QA report. Torch and weights remain outside the core environment and Git.
+
+Evidence: **Exercised** locally with Torch 2.13.0+cpu, torchvision 0.28.0+cpu, LPIPS 0.1.4, and
+checksummed AlexNet/LPIPS weights. The real 600-frame artifact measured start `0.04379`, end
+`0.02790`, and identical-frame control approximately zero. LPIPS is diagnostic until a representative
+calibration set supports a versioned threshold. Torchvision warns that pretrained models can inherit
+dataset-specific terms, so AlexNet weight permission must be reviewed for the intended commercial use.
+
 ## Chain target-image generation
 
 `target-image-cli` is a provider-neutral production image-generation/editing boundary for creating a

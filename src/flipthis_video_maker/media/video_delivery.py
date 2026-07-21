@@ -6,7 +6,7 @@ from collections.abc import Callable
 from fractions import Fraction
 from itertools import pairwise
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from PIL import Image, ImageChops, ImageDraw, ImageStat
 
@@ -34,6 +34,10 @@ class DuplicateEvidence(TypedDict):
     unique_hash_count: int
     exact_adjacent_duplicate_count: int
     longest_consecutive_run: int
+
+
+class PerceptualMetricRunner(Protocol):
+    def measure(self, reference: Path, candidate: Path) -> dict[str, object]: ...
 
 
 def mock_motion_interpolate(
@@ -227,6 +231,7 @@ def inspect_delivery_contract(
     target_end: Path,
     evidence_directory: Path,
     cancel_requested: CancelCheck | None = None,
+    perceptual_metric: PerceptualMetricRunner | None = None,
 ) -> dict[str, Any]:
     evidence_directory.mkdir(parents=True, exist_ok=True)
     timing = inspect_frame_timing(video, cancel_requested=cancel_requested)
@@ -252,6 +257,18 @@ def inspect_delivery_contract(
         frame_paths[expected_frames - 2],
         frame_paths[expected_frames - 1],
     )
+    lpips_evidence: dict[str, object]
+    if perceptual_metric is None:
+        lpips_evidence = {
+            "available": False,
+            "reason": "No local perceptual metric provider is configured",
+        }
+    else:
+        lpips_evidence = {
+            "available": True,
+            "start": perceptual_metric.measure(required_start, frame_paths[0]),
+            "end": perceptual_metric.measure(target_end, frame_paths[expected_frames - 1]),
+        }
     final_improvement = end_metrics["ssim"] - penultimate_metrics["ssim"]
     checks = {
         "duration_exact": abs(timing["duration_seconds"] - request.duration_seconds) <= 0.002,
@@ -286,10 +303,7 @@ def inspect_delivery_contract(
             "target_similarity_at_penultimate": penultimate_metrics,
             "final_improvement_in_ssim": final_improvement,
             "penultimate_to_final": last_step,
-            "lpips": {
-                "available": False,
-                "reason": "LPIPS is not installed in the lightweight core environment",
-            },
+            "lpips": lpips_evidence,
             "identity_similarity": {
                 "available": False,
                 "reason": "No privacy-reviewed identity model is installed",
@@ -595,6 +609,7 @@ def _constant_timestamp_cadence(
 
 __all__ = [
     "INSPECTION_FRAME_INDEXES",
+    "PerceptualMetricRunner",
     "create_contact_sheet",
     "decoded_frame_hashes",
     "duplicate_frame_evidence",

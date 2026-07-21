@@ -62,6 +62,7 @@ The selected generator uses only local open-source components:
 ./scripts/install-wan22-flf.sh /absolute/external/runtime/root
 ./scripts/run-wan22-flf.sh /absolute/external/runtime/root gpu1 8189
 ./scripts/install-practical-rife.sh /absolute/external/rife/root
+./scripts/install-lpips.sh /absolute/external/lpips/root
 ```
 
 Optional GPU workers use the logical-to-physical mappings in `config/workers.yaml`:

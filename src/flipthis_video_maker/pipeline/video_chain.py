@@ -18,6 +18,7 @@ from flipthis_video_maker.contracts.video_generation import (
 from flipthis_video_maker.domain.models import Asset, Project, VideoChainClip
 from flipthis_video_maker.media.ffmpeg import checksum, probe
 from flipthis_video_maker.media.video_delivery import (
+    PerceptualMetricRunner,
     inspect_delivery_contract,
     inspect_frame_timing,
     mock_motion_interpolate,
@@ -78,6 +79,7 @@ class VideoChainPipeline:
         provider: FirstLastFrameRunner,
         interpolation_provider: InterpolationRunner | None = None,
         lip_sync_provider: LipSyncRunner | None = None,
+        perceptual_metric_provider: PerceptualMetricRunner | None = None,
         cancel_requested: CancelCheck | None = None,
         progress: ProgressCallback | None = None,
     ) -> None:
@@ -85,6 +87,7 @@ class VideoChainPipeline:
         self.provider = provider
         self.interpolation_provider = interpolation_provider
         self.lip_sync_provider = lip_sync_provider
+        self.perceptual_metric_provider = perceptual_metric_provider
         self.cancel_requested = cancel_requested
         self.progress = progress
 
@@ -419,6 +422,7 @@ class VideoChainPipeline:
             target_end=end_path,
             evidence_directory=evidence,
             cancel_requested=self.cancel_requested,
+            perceptual_metric=self.perceptual_metric_provider,
         )
         if lip_sync_run is not None:
             final_media = probe(

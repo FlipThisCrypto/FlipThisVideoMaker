@@ -46,6 +46,7 @@ from flipthis_video_maker.providers.base.protocols import OOMRecoverableProvider
 from flipthis_video_maker.providers.registry import (
     configured_first_last_frame_provider,
     configured_image_provider,
+    configured_perceptual_metric_provider,
 )
 from flipthis_video_maker.scheduler.gpu import (
     GPULock,
@@ -545,9 +546,20 @@ async def _process_claimed_job(
                 and job.gpu_assignment != expected_gpu_assignment
             ):
                 raise RuntimeError("Local generation provider queue does not match the claimed Job")
+            metric_provider_id = get_settings().perceptual_metric_provider_id
+            metric_provider = (
+                configured_perceptual_metric_provider(
+                    get_settings().provider_config,
+                    metric_provider_id,
+                    cancel_requested=cancellation_requested,
+                )
+                if metric_provider_id
+                else None
+            )
             output = await VideoChainPipeline(
                 db,
                 provider=provider,
+                perceptual_metric_provider=metric_provider,
                 cancel_requested=cancellation_requested,
                 progress=report_progress,
             ).run(project, clip)

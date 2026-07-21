@@ -5,6 +5,7 @@
 - Chain contract, migration, API/UI, lineage, exact delivery QA, shared-boundary assembly, HLS
   publication, local Wan protocol fixtures, and deterministic two-clip integration: **Exercised**.
 - Local Wan and Practical-RIFE runtimes: **Exercised**. LatentSync: **Implemented, unexercised**.
+- Local LPIPS boundary QA runtime and persisted report integration: **Exercised**.
 - Immutable next-target request/Job/Asset generation and deterministic/CLI fixtures: **Exercised**.
 - Playback-aware replenishment with deterministic target/video providers: **Exercised**.
 - Real target-image model and sustainable real-time replenishment: **Implemented, unexercised**.
@@ -48,6 +49,7 @@ Install and start the isolated open-source runtime; no API key is used:
 ./scripts/install-wan22-flf.sh /absolute/external/runtime/root
 ./scripts/run-wan22-flf.sh /absolute/external/runtime/root gpu1 8189
 ./scripts/install-practical-rife.sh /absolute/external/rife/root
+./scripts/install-lpips.sh /absolute/external/lpips/root
 ```
 
 The configured provider owns GPU 1 and port 8189. Its live health probe must validate the native FLF

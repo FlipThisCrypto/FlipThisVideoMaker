@@ -46,3 +46,18 @@ Copy the three paths printed by the installer into the `rife-local` entry in
 `CUDA_VISIBLE_DEVICES` mapping determines the one physical GPU used; the adapter does not invent a
 model-specific device flag. Live health verifies Python imports, CUDA availability, and exact model
 checksums rather than treating configured paths as proof of readiness.
+
+## Local LPIPS perceptual QA runtime
+
+LPIPS runs on CPU in a separate Python 3.11 environment. The installer pins all Python packages,
+prefetches the official AlexNet-backed LPIPS 0.1 model, and checksums both weight files:
+
+```bash
+./scripts/install-lpips.sh /srv/flipthis/providers/lpips
+```
+
+Copy the printed paths into `lpips-local` in `config/providers.yaml`, enable that provider, and set
+`FTVM_PERCEPTUAL_METRIC_PROVIDER_ID=lpips-local`. Health is not ready until the real model loads.
+No image leaves the workstation. When selected, every chain QA report records start/end distance and
+provider/model provenance. Lower LPIPS distance means greater perceptual similarity; version 1
+records it diagnostically and does not invent an uncalibrated universal pass threshold.

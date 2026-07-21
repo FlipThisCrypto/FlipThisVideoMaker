@@ -50,7 +50,7 @@ logical-worker and boot-generation ownership. See ADR 0011.
 
 ## First/last-frame generative chain flow
 
-`VideoChain → immutable FLF request → hosted category-5 native video Asset → optional LatentSync
+`VideoChain → immutable FLF request → local category-5 native video Asset → optional LatentSync
 performance Asset → RIFE interpolation Asset → exact CFR delivery Asset → decoded actual boundary
 Assets + QA → review → accepted successor → shared-boundary assembly/HLS`
 
@@ -68,9 +68,9 @@ increments the lineage instead of destroying prior work.
 
 Provider-native output is never called 60-fps generation unless ffprobe proves that native fact.
 Practical-RIFE produces temporal intermediates; FFmpeg then encodes a constant 60-fps/600-frame
-delivery and extracts the inspected frames. Boundary metrics, duplicate/freeze evidence, contact
-sheet, report, and actual boundary Assets are persisted. Outputs that fail any production check are
-degraded and cannot be accepted.
+delivery and extracts the inspected frames. Boundary metrics include MAE, SSIM, dHash, and optional
+isolated local LPIPS; duplicate/freeze evidence, contact sheet, report, and actual boundary Assets
+are persisted. Outputs that fail any production check are degraded and cannot be accepted.
 
 Accepted contiguous clips can be published as an HLS EVENT playlist. Segment and playlist files are
 written atomically; successor segment frame 0 is trimmed to avoid the shared boundary duplicate.

@@ -58,6 +58,7 @@ Start with the documents in this order when resuming implementation:
 - [0013 — Playback-aware chain replenishment](adr/0013-playback-aware-chain-replenishment.md)
 - [0014 — Local-only Wan2.2 FLF](adr/0014-local-only-wan22-flf.md)
 - [0015 — Endpoint-preserving RIFE delivery](adr/0015-endpoint-preserving-rife-delivery.md)
+- [0016 — Isolated local LPIPS boundary QA](adr/0016-local-lpips-boundary-qa.md)
 
 `docs/current-status.md` is the authoritative handoff record. Update it and this map whenever a phase
 adds, removes, or renames a durable capability or document.

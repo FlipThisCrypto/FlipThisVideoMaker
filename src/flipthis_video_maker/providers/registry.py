@@ -18,6 +18,7 @@ from flipthis_video_maker.providers.comfyui.wan_flf import (
     ComfyUIWanFirstLastFrameProvider,
 )
 from flipthis_video_maker.providers.latentsync.cli import LatentSyncCliProvider
+from flipthis_video_maker.providers.lpips.cli import LpipsCliMetricProvider
 from flipthis_video_maker.providers.ltx.client import LtxVideoProvider
 from flipthis_video_maker.providers.luma.client import LumaRayVideoProvider
 from flipthis_video_maker.providers.mock.providers import (
@@ -52,6 +53,7 @@ class ProviderConfiguration(BaseModel):
         "rife",
         "latentsync",
         "ltx",
+        "lpips",
     ]
     enabled: bool = False
     endpoint: str | None = None
@@ -66,6 +68,7 @@ class ProviderConfiguration(BaseModel):
     python: Path | None = None
     script: Path | None = None
     model_directory: Path | None = None
+    cache_directory: Path | None = None
     repository_directory: Path | None = None
     unet_config_path: Path | None = None
     checkpoint_path: Path | None = None
@@ -111,6 +114,10 @@ class ProviderConfiguration(BaseModel):
             self.python is None or self.script is None or self.model_directory is None
         ):
             raise ValueError("RIFE requires python, script, and model_directory paths")
+        if self.kind == "lpips" and (
+            self.python is None or self.script is None or self.cache_directory is None
+        ):
+            raise ValueError("LPIPS requires python, script, and cache_directory paths")
         if self.kind == "latentsync" and (
             self.python is None
             or self.repository_directory is None
@@ -358,6 +365,36 @@ def configured_lip_sync_provider(
     )
 
 
+def configured_perceptual_metric_provider(
+    path: Path,
+    provider_id: str,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> LpipsCliMetricProvider:
+    configured = load_provider_configuration(path)
+    item = next((provider for provider in configured.providers if provider.id == provider_id), None)
+    if item is None:
+        raise KeyError(f"Unknown provider: {provider_id}")
+    if not item.enabled:
+        raise ValueError(f"Provider is disabled: {provider_id}")
+    if (
+        item.kind != "lpips"
+        or item.python is None
+        or item.script is None
+        or item.cache_directory is None
+    ):
+        raise ValueError(f"Provider is not an implemented perceptual metric: {provider_id}")
+    script = item.script if item.script.is_absolute() else path.parent / item.script
+    return LpipsCliMetricProvider(
+        item.id,
+        item.python,
+        script,
+        item.cache_directory,
+        timeout_seconds=item.timeout_seconds,
+        cancel_requested=cancel_requested,
+    )
+
+
 def provider_records(path: Path) -> list[ProviderInfo]:
     mocks: list[Provider] = [
         DeterministicStoryPlanner(),
@@ -494,6 +531,31 @@ def provider_records(path: Path) -> list[ProviderInfo]:
                 guidance_scale=item.guidance_scale,
                 enable_deepcache=item.enable_deepcache,
                 oom_exit_codes=item.oom_exit_codes,
+            ).info()
+            records.append(
+                record.model_copy(
+                    update={
+                        "available": item.enabled and record.available,
+                        "notes": record.notes
+                        if item.enabled
+                        else "Disabled in provider configuration",
+                    }
+                )
+            )
+            continue
+        if (
+            item.kind == "lpips"
+            and item.python is not None
+            and item.script is not None
+            and item.cache_directory is not None
+        ):
+            script = item.script if item.script.is_absolute() else path.parent / item.script
+            record = LpipsCliMetricProvider(
+                item.id,
+                item.python,
+                script,
+                item.cache_directory,
+                timeout_seconds=item.timeout_seconds,
             ).info()
             records.append(
                 record.model_copy(
@@ -665,6 +727,20 @@ async def provider_health_records(path: Path) -> list[dict[str, Any]]:
                 guidance_scale=item.guidance_scale,
                 enable_deepcache=item.enable_deepcache,
                 oom_exit_codes=item.oom_exit_codes,
+            ).health()
+            results.append({"provider": item.id, **health})
+            continue
+        if item.kind == "lpips":
+            if item.python is None or item.script is None or item.cache_directory is None:
+                results.append({"provider": item.id, "ok": False, "status": "missing_paths"})
+                continue
+            script = item.script if item.script.is_absolute() else path.parent / item.script
+            health = await LpipsCliMetricProvider(
+                item.id,
+                item.python,
+                script,
+                item.cache_directory,
+                timeout_seconds=item.timeout_seconds,
             ).health()
             results.append({"provider": item.id, **health})
             continue

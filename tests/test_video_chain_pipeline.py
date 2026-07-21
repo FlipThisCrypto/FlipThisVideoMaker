@@ -119,6 +119,22 @@ class FixtureInterpolationProvider:
         )
 
 
+class FixturePerceptualMetric:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Path, Path]] = []
+
+    def measure(self, reference: Path, candidate: Path) -> dict[str, object]:
+        self.calls.append((reference, candidate))
+        return {
+            "version": 1,
+            "metric": "lpips",
+            "network": "alex",
+            "distance": 0.01,
+            "provider_id": "fixture-lpips",
+            "model": "fixture-lpips-0.1-alex",
+        }
+
+
 class FixtureLipSyncProvider:
     async def process(
         self,
@@ -228,12 +244,41 @@ async def test_two_clip_pipeline_reuses_actual_last_frame_and_trims_shared_bound
         chain,
         _request(assets[0].id, assets[1].id),
     )
-    await VideoChainPipeline(db, provider=FixtureMotionProvider()).run(project, first)
+    perceptual_metric = FixturePerceptualMetric()
+    await VideoChainPipeline(
+        db,
+        provider=FixtureMotionProvider(),
+        perceptual_metric_provider=perceptual_metric,
+    ).run(project, first)
 
     assert first.state == ChainClipState.AWAITING_REVIEW.value
     assert first.native_video_asset_id is not None
     assert first.delivery_video_asset_id is not None
     assert first.actual_last_frame_asset_id is not None
+    assert first.qa_report_asset_id is not None
+    qa_asset = db.get(Asset, first.qa_report_asset_id)
+    assert qa_asset is not None
+    qa_report = json.loads(Path(qa_asset.file_path).read_text(encoding="utf-8"))
+    assert qa_report["boundaries"]["lpips"] == {
+        "available": True,
+        "start": {
+            "version": 1,
+            "metric": "lpips",
+            "network": "alex",
+            "distance": 0.01,
+            "provider_id": "fixture-lpips",
+            "model": "fixture-lpips-0.1-alex",
+        },
+        "end": {
+            "version": 1,
+            "metric": "lpips",
+            "network": "alex",
+            "distance": 0.01,
+            "provider_id": "fixture-lpips",
+            "model": "fixture-lpips-0.1-alex",
+        },
+    }
+    assert len(perceptual_metric.calls) == 2
     first_delivery = db.get(Asset, first.delivery_video_asset_id)
     assert first_delivery is not None
     first_facts = inspect_frame_timing(Path(first_delivery.file_path))
