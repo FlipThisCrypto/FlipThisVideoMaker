@@ -412,6 +412,10 @@ class JobRead(ORMModel):
     progress: float
     current_stage: str
     attempt_number: int
+    claimed_by_worker_id: str | None
+    claimed_by_instance_id: str | None
+    lease_heartbeat_at: datetime | None
+    lease_expires_at: datetime | None
     error_info: dict[str, Any]
     log_path: str | None
     created_at: datetime

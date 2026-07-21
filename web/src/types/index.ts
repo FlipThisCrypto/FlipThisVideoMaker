@@ -127,6 +127,10 @@ export interface Job {
   progress: number;
   current_stage: string;
   attempt_number: number;
+  claimed_by_worker_id: string | null;
+  claimed_by_instance_id: string | null;
+  lease_heartbeat_at: string | null;
+  lease_expires_at: string | null;
   error_info: Record<string, unknown>;
   log_path: string | null;
   created_at: string;

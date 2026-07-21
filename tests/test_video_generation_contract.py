@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -16,9 +17,10 @@ from flipthis_video_maker.contracts.video_generation import (
     LipSyncSettings,
     RetryContinuation,
 )
-from flipthis_video_maker.domain.models import Project, VideoChainClip
+from flipthis_video_maker.domain.models import Job, Project, VideoChainClip
 from flipthis_video_maker.media import video_delivery
 from flipthis_video_maker.providers.mock.providers import MockVideoProvider
+from flipthis_video_maker.services.jobs import claim_next, reconcile_expired_job_leases
 from flipthis_video_maker.services.video_chains import (
     VideoChainConflict,
     accept_chain_clip,
@@ -27,6 +29,7 @@ from flipthis_video_maker.services.video_chains import (
     enqueue_chain_clip,
     request_from_clip,
 )
+from flipthis_video_maker.services.workers import register_worker
 from flipthis_video_maker.storage.assets import register_asset
 
 
@@ -211,6 +214,50 @@ def test_request_digest_detects_persisted_snapshot_tampering(
 
     with pytest.raises(RuntimeError, match="digest"):
         request_from_clip(db.get(VideoChainClip, clip.id) or clip)
+
+
+def test_expired_worker_lease_marks_linked_video_clip_failed_without_requeue(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    project, asset_ids = _project_and_assets(db, tmp_path)
+    chain = create_video_chain(db, project, name="Lease recovery")
+    clip, queued_job = enqueue_chain_clip(
+        db,
+        project,
+        chain,
+        _request(asset_ids[0], asset_ids[1]),
+    )
+    claimed_at = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    worker = register_worker(
+        db,
+        "cpu",
+        "cpu",
+        instance_id="expired-generation",
+        registered_at=claimed_at,
+    )
+    claimed = claim_next(
+        db,
+        "cpu",
+        worker_id=worker.id,
+        worker_instance_id=worker.instance_id,
+        lease_seconds=10,
+        claimed_at=claimed_at,
+    )
+    assert claimed is not None and claimed.id == queued_job.id
+
+    recovered = reconcile_expired_job_leases(
+        db,
+        checked_at=claimed_at + timedelta(seconds=11),
+    )
+
+    assert len(recovered) == 1
+    db.refresh(clip)
+    persisted_job = db.get(Job, queued_job.id)
+    assert persisted_job is not None
+    assert persisted_job.state == "failed"
+    assert clip.state == ChainClipState.FAILED.value
+    assert clip.failure_info["failure_kind"] == "orphaned_worker_lease"
 
 
 def test_frame_timing_rejects_variable_timestamps_even_when_rates_claim_cfr(

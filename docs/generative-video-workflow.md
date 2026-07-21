@@ -84,6 +84,12 @@ immutable request digest, then resumes from persisted stages. It never overwrite
 Remote hosted jobs may continue after local cancellation because neither selected hosted API
 documents cancellation; the remote Job ID remains in failure/provenance data.
 
+Production workers own running Jobs through a bounded renewable lease. If a process disappears, the
+next worker reconciles the expired Job and linked chain clip to failed/cancelled with
+`retry_safe: false`; it never assumes an unknown hosted or local process stopped. Inspect or cancel
+external work, then use the explicit **Acknowledge orphan risk and retry** action. The retry clears
+the old owner, receives a new boot-generation owner, and resumes any persisted immutable stages.
+
 ## Streaming behavior
 
 The playlist is HLS EVENT, updated atomically after each validated segment. `stream_state` exposes

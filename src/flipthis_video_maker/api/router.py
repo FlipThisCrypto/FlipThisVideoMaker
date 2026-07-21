@@ -677,13 +677,23 @@ def cancel_chain(chain_id: str, db: DB) -> VideoChain:
 
 
 @router.post("/video-chain-clips/{clip_id}/retry", response_model=JobRead)
-def retry_video_chain_clip(clip_id: str, db: DB, settings: Config) -> Job:
+def retry_video_chain_clip(
+    clip_id: str,
+    db: DB,
+    settings: Config,
+    acknowledge_orphan_risk: bool = False,
+) -> Job:
     clip = require(db, VideoChainClip, clip_id)
     if clip.job_id is None:
         raise HTTPException(409, "Video chain clip has no Job")
     job = require(db, Job, clip.job_id)
     try:
-        retry(db, job, settings.max_job_retries)
+        retry(
+            db,
+            job,
+            settings.max_job_retries,
+            acknowledge_unsafe_orphan=acknowledge_orphan_risk,
+        )
         clip.state = ChainClipState.QUEUED.value
         clip.failure_info = {}
         db.commit()
@@ -769,10 +779,20 @@ def cancel_job(job_id: str, db: DB) -> dict[str, str]:
 
 
 @router.post("/jobs/{job_id}/retry")
-def retry_job(job_id: str, db: DB, settings: Config) -> dict[str, str]:
+def retry_job(
+    job_id: str,
+    db: DB,
+    settings: Config,
+    acknowledge_orphan_risk: bool = False,
+) -> dict[str, str]:
     job = require(db, Job, job_id)
     try:
-        retry(db, job, settings.max_job_retries)
+        retry(
+            db,
+            job,
+            settings.max_job_retries,
+            acknowledge_unsafe_orphan=acknowledge_orphan_risk,
+        )
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
     if job.job_type == "video_chain_clip_generation":

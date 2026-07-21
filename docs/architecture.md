@@ -12,7 +12,8 @@ assembly.
   `CUDA_VISIBLE_DEVICES` before doing work. They lock one configured physical device, evaluate only
   that device's VRAM, and claim only after admission succeeds.
 - Worker process generations publish persistent heartbeats from a separate thread. Boot tokens stop
-  an old process from overwriting a restarted worker; stale liveness is not treated as a job lease.
+  an old process from overwriting a restarted worker. Owned Jobs carry a separately renewed bounded
+  lease; expiry is reconciled to a terminal unsafe-orphan result rather than blindly requeued.
 - Providers translate domain requests into backend-specific protocols. ComfyUI, WanGP, generic
   CLI, Ollama-compatible, and future payloads stay inside provider adapters.
 - Generated files live in a configured external project directory. The database stores checksums,
@@ -44,6 +45,8 @@ The media runner retains ownership of each FFmpeg/ffprobe process, polls the per
 state, and terminates then kills/reaps a process when required. Validated inputs and retryable shot
 state are committed before long media work so SQLite does not block cancellation writes. Job
 completion and cancellation use conditional database transitions so only one terminal path wins.
+Progress, fallback, and terminal writes from production workers are also conditional on the Job's
+logical-worker and boot-generation ownership. See ADR 0011.
 
 ## First/last-frame generative chain flow
 

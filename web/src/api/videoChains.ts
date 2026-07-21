@@ -66,8 +66,14 @@ export function reviewVideoChainClip(
   });
 }
 
-export function retryVideoChainClip(clipId: string) {
-  return api<Job>(`/video-chain-clips/${clipId}/retry`, { method: "POST" });
+export function retryVideoChainClip(
+  clipId: string,
+  acknowledgeOrphanRisk = false,
+) {
+  const query = acknowledgeOrphanRisk ? "?acknowledge_orphan_risk=true" : "";
+  return api<Job>(`/video-chain-clips/${clipId}/retry${query}`, {
+    method: "POST",
+  });
 }
 
 export function assembleVideoChain(chainId: string) {

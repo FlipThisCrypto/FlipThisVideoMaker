@@ -274,7 +274,10 @@ export function VideoChains() {
     onSuccess: invalidate,
   });
   const retryClip = useMutation({
-    mutationFn: retryVideoChainClip,
+    mutationFn: ({ clipId, acknowledgeOrphanRisk }: {
+      clipId: string;
+      acknowledgeOrphanRisk: boolean;
+    }) => retryVideoChainClip(clipId, acknowledgeOrphanRisk),
     onSuccess: invalidate,
   });
   const assemble = useMutation({
@@ -647,7 +650,12 @@ export function VideoChains() {
                   onReview={(operation) =>
                     review.mutate({ clipId: clip.id, operation })
                   }
-                  onRetry={() => retryClip.mutate(clip.id)}
+                  onRetry={(acknowledgeOrphanRisk) =>
+                    retryClip.mutate({
+                      clipId: clip.id,
+                      acknowledgeOrphanRisk,
+                    })
+                  }
                 />
               ))}
               {(clips.data ?? []).length === 0 && (
@@ -775,9 +783,10 @@ function ClipEvidenceCard({
   clip: VideoChainClip;
   pending: boolean;
   onReview: (operation: "accept" | "reject") => void;
-  onRetry: () => void;
+  onRetry: (acknowledgeOrphanRisk: boolean) => void;
 }) {
   const reviewable = ["awaiting_review", "degraded"].includes(clip.state);
+  const unsafeOrphanRetry = clip.failure_info.retry_safe === false;
   return (
     <article className="card">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -831,11 +840,23 @@ function ClipEvidenceCard({
           </button>
         )}
         {["failed", "cancelled"].includes(clip.state) && (
-          <button className="button" disabled={pending} onClick={onRetry}>
-            Retry from persisted stages
+          <button
+            className="button"
+            disabled={pending}
+            onClick={() => onRetry(unsafeOrphanRetry)}
+          >
+            {unsafeOrphanRetry
+              ? "Acknowledge orphan risk and retry"
+              : "Retry from persisted stages"}
           </button>
         )}
       </div>
+      {unsafeOrphanRetry && (
+        <p className="mt-3 text-sm text-amber-200" role="alert">
+          The prior worker lease expired. Its hosted or local provider process may still be
+          running, so retrying can duplicate work or cost. Verify or cancel it externally first.
+        </p>
+      )}
       {clip.state === "degraded" && (
         <p className="mt-3 text-sm text-red-300" role="alert">
           This output failed the production continuity threshold and cannot be accepted.

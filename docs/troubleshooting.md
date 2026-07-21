@@ -17,10 +17,12 @@ remains queued and its attempt count does not increase.
 
 ## Worker is stale after a crash
 
-The API derives online status from `last_heartbeat_at` and `FTVM_WORKER_STALE_SECONDS`. A stale row is
-not proof that an external provider process stopped, so the application does not automatically
-requeue its current job. Inspect the worker/provider process and job log, stop any orphan process,
-then use the explicit retry action when safe.
+The API derives online status from `last_heartbeat_at` and `FTVM_WORKER_STALE_SECONDS`. Production
+claims also have a renewable `FTVM_JOB_LEASE_SECONDS` ownership lease. A worker reconciles an expired
+running lease to a failed `orphaned_worker_lease`; it never automatically requeues it because a stale
+row is not proof that an external provider process stopped. Inspect the worker/provider process and
+job log, stop any orphan process, then use **Acknowledge orphan risk and retry**. Late writes from the
+expired worker generation are rejected.
 
 ## FFmpeg render fails
 

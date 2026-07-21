@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createVideoChainClip } from "./videoChains";
+import { createVideoChainClip, retryVideoChainClip } from "./videoChains";
 
 function response(body: unknown) {
   return Promise.resolve(
@@ -55,5 +55,18 @@ describe("video-chain API", () => {
     expect(serialized).not.toContain("/home/");
     expect(serialized).toContain("actual-last-asset");
     expect(serialized).toContain("rife-local");
+  });
+
+  it("makes orphan-risk acknowledgement explicit on retry", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() => response({ id: "job-1", state: "queued" }));
+
+    await retryVideoChainClip("clip-1", true);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/video-chain-clips/clip-1/retry?acknowledge_orphan_risk=true",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });

@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,9 +32,11 @@ from flipthis_video_maker.providers.mock.providers import MockVideoProvider
 from flipthis_video_maker.services.jobs import (
     claim_next,
     mark_succeeded,
+    reconcile_expired_job_leases,
     request_cancellation,
     retry,
 )
+from flipthis_video_maker.services.workers import register_worker
 from flipthis_video_maker.workers import main as worker_main
 from flipthis_video_maker.workers.main import process_next
 
@@ -52,6 +54,203 @@ def test_claims_only_the_workers_exact_queue(db: Session, tmp_path: Path) -> Non
     assert claimed.id == cpu_job.id
     assert claimed.attempt_number == 1
     assert gpu_job.state == JobState.QUEUED.value
+
+
+def test_owned_claim_records_and_renews_a_bounded_job_lease(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    project = create_sample(db, tmp_path / "project")
+    job = Job(job_type="render", project_id=project.id, gpu_assignment="cpu")
+    db.add(job)
+    db.commit()
+    claimed_at = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    worker = register_worker(
+        db,
+        "cpu",
+        "cpu",
+        instance_id="lease-generation",
+        registered_at=claimed_at,
+    )
+
+    claimed = claim_next(
+        db,
+        "cpu",
+        worker_id=worker.id,
+        worker_instance_id=worker.instance_id,
+        lease_seconds=30,
+        claimed_at=claimed_at,
+    )
+
+    assert claimed is not None
+    assert claimed.claimed_by_worker_id == "cpu"
+    assert claimed.claimed_by_instance_id == "lease-generation"
+    assert _aware(claimed.lease_heartbeat_at) == claimed_at
+    assert _aware(claimed.lease_expires_at) == claimed_at + timedelta(seconds=30)
+
+
+def test_worker_cannot_claim_a_queue_other_than_its_registered_assignment(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    project = create_sample(db, tmp_path / "project")
+    job = Job(job_type="render", project_id=project.id, gpu_assignment="gpu0")
+    db.add(job)
+    db.commit()
+    worker = register_worker(db, "cpu", "cpu", instance_id="cpu-generation")
+
+    claimed = claim_next(
+        db,
+        "gpu0",
+        worker_id=worker.id,
+        worker_instance_id=worker.instance_id,
+    )
+
+    assert claimed is None
+    db.refresh(job)
+    assert job.state == JobState.QUEUED.value
+
+
+def test_expired_job_lease_requires_acknowledged_retry_and_blocks_stale_completion(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    project = create_sample(db, tmp_path / "project")
+    job = Job(job_type="render", project_id=project.id, gpu_assignment="cpu")
+    db.add(job)
+    db.commit()
+    claimed_at = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    old_worker = register_worker(
+        db,
+        "cpu-old",
+        "cpu",
+        instance_id="old-generation",
+        registered_at=claimed_at,
+    )
+    claimed = claim_next(
+        db,
+        "cpu",
+        worker_id=old_worker.id,
+        worker_instance_id=old_worker.instance_id,
+        lease_seconds=10,
+        claimed_at=claimed_at,
+    )
+    assert claimed is not None
+
+    assert (
+        mark_succeeded(
+            db,
+            claimed,
+            ["expired-owner-output"],
+            worker_id=old_worker.id,
+            worker_instance_id=old_worker.instance_id,
+        )
+        is JobState.RUNNING
+    )
+    db.refresh(claimed)
+    assert claimed.output_asset_ids == []
+
+    recoveries = reconcile_expired_job_leases(
+        db,
+        checked_at=claimed_at + timedelta(seconds=11),
+    )
+
+    assert len(recoveries) == 1
+    assert recoveries[0].job_id == job.id
+    db.refresh(job)
+    assert job.state == JobState.FAILED.value
+    assert job.error_info["failure_kind"] == "orphaned_worker_lease"
+    assert job.error_info["retry_safe"] is False
+    assert job.lease_expires_at is None
+    with pytest.raises(ValueError, match="orphan-risk acknowledgement"):
+        retry(db, job, max_retries=2)
+
+    retry(db, job, max_retries=2, acknowledge_unsafe_orphan=True)
+    reclaimed_at = datetime.now(UTC)
+    new_worker = register_worker(
+        db,
+        "cpu-new",
+        "cpu",
+        instance_id="new-generation",
+        registered_at=reclaimed_at,
+    )
+    reclaimed = claim_next(
+        db,
+        "cpu",
+        worker_id=new_worker.id,
+        worker_instance_id=new_worker.instance_id,
+        lease_seconds=30,
+        claimed_at=reclaimed_at,
+    )
+    assert reclaimed is not None
+    assert reclaimed.attempt_number == 2
+
+    assert (
+        mark_succeeded(
+            db,
+            reclaimed,
+            ["stale-output"],
+            worker_id=old_worker.id,
+            worker_instance_id=old_worker.instance_id,
+        )
+        is JobState.RUNNING
+    )
+    db.refresh(reclaimed)
+    assert reclaimed.output_asset_ids == []
+    assert (
+        mark_succeeded(
+            db,
+            reclaimed,
+            ["current-output"],
+            worker_id=new_worker.id,
+            worker_instance_id=new_worker.instance_id,
+        )
+        is JobState.SUCCEEDED
+    )
+
+
+def test_expired_cancel_requested_lease_finishes_cancelled(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    project = create_sample(db, tmp_path / "project")
+    job = Job(job_type="render", project_id=project.id, gpu_assignment="cpu")
+    db.add(job)
+    db.commit()
+    claimed_at = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    worker = register_worker(
+        db,
+        "cpu",
+        "cpu",
+        instance_id="cancel-generation",
+        registered_at=claimed_at,
+    )
+    claimed = claim_next(
+        db,
+        "cpu",
+        worker_id=worker.id,
+        worker_instance_id=worker.instance_id,
+        lease_seconds=10,
+        claimed_at=claimed_at,
+    )
+    assert claimed is not None
+    assert request_cancellation(db, claimed) is JobState.CANCEL_REQUESTED
+
+    recovered = reconcile_expired_job_leases(
+        db,
+        checked_at=claimed_at + timedelta(seconds=11),
+    )
+
+    assert recovered[0].recovered_state is JobState.CANCELLED
+    db.refresh(job)
+    assert job.state == JobState.CANCELLED.value
+    assert job.error_info["retry_safe"] is False
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
 
 
 def test_queued_job_can_be_cancelled_and_retried(db: Session, tmp_path: Path) -> None:
@@ -128,6 +327,7 @@ async def test_worker_uses_the_immutable_enqueued_render_profile(
     )
     db.add(job)
     db.commit()
+    worker = register_worker(db, "cpu", "cpu", instance_id="processing-generation")
     observed: list[RenderProfileExecution] = []
 
     async def capture_profile(pipeline: MockPipeline, _project_id: str) -> SimpleNamespace:
@@ -138,13 +338,23 @@ async def test_worker_uses_the_immutable_enqueued_render_profile(
     profiles.profiles["standard"] = profiles.require("draft")
     monkeypatch.setattr(MockPipeline, "run", capture_profile)
 
-    assert await process_next(db, "cpu", render_profiles=profiles)
+    assert await process_next(
+        db,
+        "cpu",
+        render_profiles=profiles,
+        worker_id=worker.id,
+        worker_instance_id=worker.instance_id,
+        lease_seconds=30,
+    )
     db.refresh(job)
     persisted = render_profile_execution_from_payload(job.payload)
     assert job.state == JobState.SUCCEEDED.value
     assert observed[0].effective_profile == "standard"
     assert observed[0].profile.width == 1280
     assert persisted == execution
+    assert job.claimed_by_worker_id == worker.id
+    assert job.claimed_by_instance_id == worker.instance_id
+    assert job.lease_expires_at is None
 
 
 @pytest.mark.asyncio

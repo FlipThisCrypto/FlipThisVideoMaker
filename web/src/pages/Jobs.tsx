@@ -13,10 +13,15 @@ export function Jobs() {
     mutationFn: ({
       id,
       operation,
+      acknowledgeOrphanRisk = false,
     }: {
       id: string;
       operation: "cancel" | "retry";
-    }) => api(`/jobs/${id}/${operation}`, { method: "POST" }),
+      acknowledgeOrphanRisk?: boolean;
+    }) => {
+      const query = acknowledgeOrphanRisk ? "?acknowledge_orphan_risk=true" : "";
+      return api(`/jobs/${id}/${operation}${query}`, { method: "POST" });
+    },
     onSuccess: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
   });
   return (
@@ -34,6 +39,13 @@ export function Jobs() {
               {job.current_stage} · {job.gpu_assignment} · attempt{" "}
               {job.attempt_number}
             </p>
+            {job.claimed_by_worker_id && (
+              <p className="mt-1 text-xs text-slate-400">
+                owner {job.claimed_by_worker_id} · lease heartbeat{" "}
+                {job.lease_heartbeat_at ?? "not active"} · expires{" "}
+                {job.lease_expires_at ?? "terminal"}
+              </p>
+            )}
             {job.render_profile_execution && (
               <RenderProfileExecutionSummary
                 execution={job.render_profile_execution}
@@ -91,13 +103,25 @@ export function Jobs() {
                   className="button"
                   disabled={action.isPending}
                   onClick={() =>
-                    action.mutate({ id: job.id, operation: "retry" })
+                    action.mutate({
+                      id: job.id,
+                      operation: "retry",
+                      acknowledgeOrphanRisk: job.error_info.retry_safe === false,
+                    })
                   }
                 >
-                  Retry
+                  {job.error_info.retry_safe === false
+                    ? "Acknowledge orphan risk and retry"
+                    : "Retry"}
                 </button>
               )}
             </div>
+            {job.error_info.retry_safe === false && (
+              <p className="mt-3 text-sm text-amber-200" role="alert">
+                The previous worker lease expired while its provider process state was unknown.
+                Verify or cancel external work before acknowledging a retry.
+              </p>
+            )}
             {Object.keys(job.error_info).length > 0 && (
               <details className="mt-3">
                 <summary>Error details</summary>

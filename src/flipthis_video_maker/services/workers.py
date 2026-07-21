@@ -11,8 +11,8 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from flipthis_video_maker.domain.enums import WorkerState
-from flipthis_video_maker.domain.models import Worker
+from flipthis_video_maker.domain.enums import JobState, WorkerState
+from flipthis_video_maker.domain.models import Job, Worker
 
 logger = structlog.get_logger(__name__)
 SessionFactory = Callable[[], Session]
@@ -76,9 +76,12 @@ def update_worker_status(
     state: WorkerState,
     current_job_id: str | None,
     heartbeat_at: datetime | None = None,
+    lease_seconds: float = 30,
 ) -> bool:
     """Update a worker only when the caller still owns its current boot generation."""
     timestamp = heartbeat_at or datetime.now(UTC)
+    if lease_seconds <= 0:
+        raise ValueError("Job lease duration must be positive")
     values: dict[str, object] = {
         "state": state.value,
         "current_job_id": current_job_id,
@@ -91,8 +94,35 @@ def update_worker_status(
         .values(**values)
         .returning(Worker.id)
     ).scalar_one_or_none()
+    if updated_id is None:
+        db.rollback()
+        return False
+    if current_job_id is not None:
+        if state is not WorkerState.BUSY:
+            db.rollback()
+            raise ValueError("A worker with a current Job must be busy")
+        renewed_id = db.execute(
+            update(Job)
+            .where(
+                Job.id == current_job_id,
+                Job.state.in_([JobState.RUNNING.value, JobState.CANCEL_REQUESTED.value]),
+                Job.claimed_by_worker_id == worker_id,
+                Job.claimed_by_instance_id == instance_id,
+                Job.lease_expires_at.is_not(None),
+                Job.lease_expires_at > timestamp,
+            )
+            .values(
+                lease_heartbeat_at=timestamp,
+                lease_expires_at=timestamp + timedelta(seconds=lease_seconds),
+            )
+            .returning(Job.id)
+            .execution_options(synchronize_session=False)
+        ).scalar_one_or_none()
+        if renewed_id is None:
+            db.rollback()
+            return False
     db.commit()
-    return updated_id is not None
+    return True
 
 
 def get_worker(db: Session, worker_id: str) -> Worker | None:
@@ -132,16 +162,20 @@ class WorkerHeartbeatReporter:
         assignment: str,
         *,
         heartbeat_seconds: float = 5,
+        lease_seconds: float = 30,
         instance_id: str | None = None,
         hostname: str | None = None,
         pid: int | None = None,
     ) -> None:
         if heartbeat_seconds <= 0:
             raise ValueError("Worker heartbeat interval must be positive")
+        if lease_seconds <= heartbeat_seconds:
+            raise ValueError("Job lease duration must exceed the heartbeat interval")
         self.session_factory = session_factory
         self.worker_id = worker_id
         self.assignment = assignment
         self.heartbeat_seconds = heartbeat_seconds
+        self.lease_seconds = lease_seconds
         self.instance_id = instance_id or str(uuid.uuid4())
         self.hostname = hostname or socket.gethostname()
         self.pid = pid if pid is not None else os.getpid()
@@ -231,6 +265,7 @@ class WorkerHeartbeatReporter:
                         self.instance_id,
                         state=state,
                         current_job_id=current_job_id,
+                        lease_seconds=self.lease_seconds,
                     )
                 with self._lock:
                     self._last_error = None

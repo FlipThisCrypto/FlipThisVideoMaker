@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted — 2026-07-12.
+Superseded in part by ADR 0011 — 2026-07-20. The heartbeat/liveness decision remains active; ADR
+0011 adds the separate Job-ownership lease anticipated here.
 
 ## Context
 
@@ -33,5 +34,6 @@ ownership, lease expiry, and provider-process reconciliation.
 
 The API can distinguish configured, online, busy, stopped, and stale workers after restarts; the
 current dashboard presents an aggregate online/busy summary. Fast worker restarts are protected from
-late writes and claims by the prior process. Operators must still resolve or retry jobs owned by a
-stale worker manually until a separate lease-and-reconciliation protocol is implemented.
+late writes and claims by the prior process. ADR 0011 now reconciles expired owned Jobs to an
+explicit unsafe-orphan terminal result. Operators must still inspect unknown external provider work
+and acknowledge risk before retry; liveness alone never triggers blind requeue.

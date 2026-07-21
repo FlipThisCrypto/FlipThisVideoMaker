@@ -15,6 +15,7 @@ from flipthis_video_maker.domain.enums import JobState, WorkerState
 from flipthis_video_maker.domain.models import Job
 from flipthis_video_maker.pipeline.mock_pipeline import create_sample
 from flipthis_video_maker.scheduler.gpu import GPUMetrics, GPUProbeResult
+from flipthis_video_maker.services.jobs import claim_next
 from flipthis_video_maker.services.workers import (
     WorkerHeartbeatReporter,
     get_worker,
@@ -96,6 +97,71 @@ def test_stale_worker_generation_cannot_update_new_registration(db: Session) -> 
     db.refresh(replacement)
     assert replacement.instance_id == "new-generation"
     assert replacement.state == WorkerState.STARTING.value
+
+
+def test_busy_worker_heartbeat_renews_only_its_owned_job_lease(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    started_at = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    project = create_sample(db, tmp_path / "project")
+    job = Job(job_type="render", project_id=project.id, gpu_assignment="cpu")
+    db.add(job)
+    db.commit()
+    worker = register_worker(
+        db,
+        "cpu",
+        "cpu",
+        instance_id="lease-owner",
+        registered_at=started_at,
+    )
+    claimed = claim_next(
+        db,
+        "cpu",
+        worker_id=worker.id,
+        worker_instance_id=worker.instance_id,
+        lease_seconds=10,
+        claimed_at=started_at,
+    )
+    assert claimed is not None
+    heartbeat_at = started_at + timedelta(seconds=5)
+
+    assert update_worker_status(
+        db,
+        worker.id,
+        worker.instance_id,
+        state=WorkerState.BUSY,
+        current_job_id=job.id,
+        heartbeat_at=heartbeat_at,
+        lease_seconds=10,
+    )
+    db.refresh(job)
+    assert _utc(job.lease_heartbeat_at or started_at) == heartbeat_at
+    assert _utc(job.lease_expires_at or started_at) == heartbeat_at + timedelta(seconds=10)
+
+    assert not update_worker_status(
+        db,
+        worker.id,
+        "wrong-generation",
+        state=WorkerState.BUSY,
+        current_job_id=job.id,
+        heartbeat_at=heartbeat_at + timedelta(seconds=1),
+        lease_seconds=10,
+    )
+    db.refresh(job)
+    assert _utc(job.lease_expires_at or started_at) == heartbeat_at + timedelta(seconds=10)
+
+    assert not update_worker_status(
+        db,
+        worker.id,
+        worker.instance_id,
+        state=WorkerState.BUSY,
+        current_job_id=job.id,
+        heartbeat_at=started_at + timedelta(seconds=16),
+        lease_seconds=10,
+    )
+    db.refresh(job)
+    assert _utc(job.lease_expires_at or started_at) == heartbeat_at + timedelta(seconds=10)
 
 
 def test_heartbeat_thread_progresses_while_calling_thread_waits(db: Session) -> None:

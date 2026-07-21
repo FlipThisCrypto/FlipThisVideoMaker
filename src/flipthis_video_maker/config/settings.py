@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     render_profile_config: Path = Path("config/render-profiles.yaml")
     worker_heartbeat_seconds: float = Field(default=5, gt=0)
     worker_stale_seconds: float = Field(default=20, gt=0)
+    job_lease_seconds: float = Field(default=30, gt=0)
     bind_host: str = "127.0.0.1"
     bind_port: int = 8000
     max_upload_mb: int = 100

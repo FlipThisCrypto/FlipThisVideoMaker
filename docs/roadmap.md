@@ -9,6 +9,8 @@
 - Exact 10-second/60-fps/600-frame delivery and boundary/freeze/snap QA.
 - Actual-final-frame successor lineage, restart/retry, shared-boundary assembly, atomic HLS buffer,
   and full React workflow.
+- Bounded worker-generation Job leases, expired-orphan reconciliation, stale-write rejection, and
+  explicit unsafe-retry acknowledgement.
 
 These are fixture/integration-proven. Real model quality remains blocked.
 
@@ -30,5 +32,5 @@ failures until the acceptance threshold passes.
    never use a visible morph or final-frame overwrite to pass.
 5. Implement automatic next-target generation and asynchronous buffer replenishment after real
    generation throughput establishes a safe buffer size and sustainable real-time factor.
-6. Add authentication before any non-local exposure, then PostgreSQL claiming/job leases and orphan
-   reconciliation before multi-host operation.
+6. Add authentication before any non-local exposure, then PostgreSQL row locking and distributed
+   admission before multi-host operation. Single-host Job ownership leases are now exercised.

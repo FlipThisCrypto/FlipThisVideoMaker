@@ -7,8 +7,9 @@ model-specific systems stay behind adapters or isolated worker processes.
 The original exercised milestone is a deterministic CPU-only 31.25-second four-shot render with consistent
 audio/video streams, immutable run versions, actual-ending-frame continuity, shared-frame trimming,
 a real crossfade, a hard cut, subtitles, thumbnail, contact sheet, and manifest. Persisted worker
-heartbeats, active FFmpeg cancellation, atomic job completion/cancellation, and per-device VRAM
-admission provide the current recovery and scheduling boundary. Render and shot-regeneration jobs
+heartbeats, renewable Job ownership leases, active FFmpeg cancellation, atomic job
+completion/cancellation, and per-device VRAM admission provide the current recovery and scheduling
+boundary. Render and shot-regeneration jobs
 capture immutable effective profiles; typed provider-owned image/video OOM recovery can safely
 advance a captured lower-profile chain without changing GPU or Job attempt.
 

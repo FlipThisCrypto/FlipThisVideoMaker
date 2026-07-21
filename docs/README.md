@@ -53,6 +53,7 @@ Start with the documents in this order when resuming implementation:
 - [0008 — Persist completed post-processing stages](adr/0008-persist-completed-postprocessing-stages.md)
 - [0009 — Snapshot final-render execution inputs](adr/0009-snapshot-finalization-execution.md)
 - [0010 — First/last-frame generative video stack](adr/0010-first-last-generative-video-stack.md)
+- [0011 — Durable Job ownership leases](adr/0011-durable-job-ownership-leases.md)
 
 `docs/current-status.md` is the authoritative handoff record. Update it and this map whenever a phase
 adds, removes, or renames a durable capability or document.

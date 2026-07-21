@@ -44,6 +44,8 @@ chain enqueue discovers and health-checks only a true category-5 provider plus a
 - Alembic revision `0004` adds durable `video_chains` and `video_chain_clips` with planned versus
   actual boundary Assets, predecessor and lineage, immutable snapshots, stage/result Assets, review
   state, Job/provider IDs, warnings, and failure data.
+- Alembic revision `0005` adds indexed worker/boot-generation ownership and renewable lease
+  timestamps to Jobs. Empty upgrade, downgrade to `0004`, re-upgrade, and schema drift checks pass.
 - A database uniqueness boundary prevents two conflicting successors in one lineage. Regeneration
   from an earlier accepted clip creates a new lineage. Failed clips retry without modifying accepted
   predecessors.
@@ -142,6 +144,9 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 - SQLite uses WAL and foreign keys. Production startup does not call `create_all`.
 - Completed stages and generated Assets are versioned, checksummed, and never overwritten.
 - Job claims/terminal transitions/cancellation/retry and worker heartbeats remain restart-safe.
+- Production claims carry logical-worker and boot-generation ownership with a renewable bounded
+  lease. Expired running work becomes a visible unsafe orphan rather than remaining stuck or being
+  blindly requeued; progress and terminal writes from superseded workers are rejected.
 - CPU, `gpu0`, and `gpu1` worker queues map to independent physical devices and use per-device locks
   and admission. Two RTX 4070 12,282 MB cards were previously discovered. No pooled VRAM, NVLink, or
   model-parallel claim is made.
@@ -153,14 +158,14 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Check | Latest observed result |
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
-| Empty Alembic upgrade / downgrade / re-upgrade / check | Passed through revision `0004`; no drift. Application engine probe: WAL, foreign keys `1`, two chain tables |
-| Ruff / formatting / strict MyPy | Passed; 99 files formatted, 64 source files type-checked |
-| Focused FLF/provider/pipeline tests | Passed; 27 provider/contract/pipeline tests after final immutability changes |
-| Complete pytest | Passed; 147 tests in 116.40 seconds |
+| Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0005`, downgrade to `0004`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, four lease columns |
+| Ruff / formatting / strict MyPy | Passed; 100 files formatted, 64 source files type-checked |
+| Focused Job ownership/recovery tests | Passed; 45 Job, worker, API, and chain-contract tests |
+| Complete pytest | Passed; 154 tests in 109.99 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
-| Frontend Vitest / lint / build | Passed; 12 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 25.1 seconds |
-| Public exposure/secret sweep | Passed; no credential value, personal path, generated media/database, key file, or sensitive history object found |
+| Frontend Vitest / lint / build | Passed; 13 tests, ESLint, TypeScript, and Vite production build |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 24.5 seconds |
+| Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Real backend acceptance | **Blocked: no hosted credential or external RIFE/LatentSync runtime available** |
 
 ## Known limitations and blockers
@@ -173,8 +178,8 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
    dHash plus SSIM/MAE/RMSE.
 4. Hosted generation cannot be remotely cancelled through the reviewed APIs.
 5. Automatic target generation and autonomous streaming replenishment are not implemented.
-6. PostgreSQL `SKIP LOCKED`, true job leases/orphan reconciliation, and enforced configured worker
-   concurrency remain absent.
+6. PostgreSQL `SKIP LOCKED`, distributed admission, and enforced configured worker concurrency
+   remain absent. Current leases are a single-host SQLite safety boundary.
 7. Authentication remains local-only by default. Do not expose the service publicly as-is.
 8. Exact hosted/model/output/privacy/commercial terms require administrator review before enablement.
 

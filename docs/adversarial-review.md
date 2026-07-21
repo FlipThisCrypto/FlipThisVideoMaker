@@ -3,7 +3,7 @@
 **Review date:** 2026-07-20
 
 **Target:** the `codex/flf-generative-video` vertical slice, including the versioned request/result
-contract, migration 0004, provider adapters, worker pipeline, media QA, chain persistence, assembly,
+contract, migrations 0004–0005, provider adapters, worker pipeline, media QA, chain persistence, assembly,
 HLS publication, React workflow, tests, and documentation.
 
 **Verdict:** **APPROVE WITH FIXES** as a recoverable implementation checkpoint. Do not approve a
@@ -15,7 +15,7 @@ passes. Protocol fixtures prove contract behavior, not visual generation quality
 - `MEMORY.md` for the product goal and non-negotiable evidence rules.
 - `docs/current-status.md` for exercised versus unexercised state.
 - ADR 0010 and `docs/provider-decision.md` for the selected provider stack.
-- Migration 0004, the immutable request/result models, provider protocol fixtures, integration
+- Migrations 0004–0005, the immutable request/result models, provider protocol fixtures, integration
   tests, FFprobe frame/timestamp evidence, and Playwright workflow for implementation evidence.
 - Current primary provider documentation linked from `docs/provider-decision.md` for external
   capability facts.
@@ -33,6 +33,7 @@ passes. Protocol fixtures prove contract behavior, not visual generation quality
 | Branching loses inherited clips or publishes the wrong branch | Active paths are resolved by predecessor links across lineage versions and tested with an inherited prefix. |
 | Concurrent workers create conflicting successors | Database uniqueness plus service conflict handling prevents two successors for one predecessor and lineage. |
 | Restart recomputes or overwrites completed work | Native, lip-sync-source, lip-sync, RIFE, and delivery stage Assets are checkpointed; a restart test proves native and RIFE are each called once. New stage paths are versioned and writers refuse existing destinations. |
+| A crashed worker leaves a Job stuck or a stale process completes a newer retry | Owned Jobs have renewable boot-generation leases. Expiry produces an unsafe terminal orphan, retry requires acknowledgement, and stale completion is rejected after a new owner claims the Job. |
 | A tampered request or stale Job runs | The worker compares the clip digest, Job request snapshot, and exact input Asset IDs before provider execution. |
 | Cancellation leaves local children or inconsistent clip state | Media process ownership terminates then kills when needed; adapters remove partials; worker tests cover cancellation; clip and Job terminal states are updated together. Hosted remote cancellation remains unsupported by the selected APIs and is disclosed. |
 | Partial or invalid media is published | Providers and media stages use partial files plus atomic moves, validate output, and HLS publishes only accepted clips after segment validation. |

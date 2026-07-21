@@ -4,11 +4,12 @@ import os
 import signal
 from collections.abc import Callable
 from contextlib import nullcontext
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from flipthis_video_maker.config.render_finalization import (
@@ -52,6 +53,7 @@ from flipthis_video_maker.services.jobs import (
     mark_cancelled,
     mark_failed,
     mark_succeeded,
+    reconcile_expired_job_leases,
 )
 from flipthis_video_maker.services.render_finalization import revalidate_render_finalization
 from flipthis_video_maker.services.video_chains import (
@@ -66,6 +68,43 @@ logger = structlog.get_logger(__name__)
 WorkerStatusCallback = Callable[[WorkerState, str | None], None]
 
 
+class JobLeaseLost(RuntimeError):
+    pass
+
+
+def _update_owned_running_job(
+    db: Session,
+    job: Job,
+    values: dict[str, object],
+    *,
+    worker_id: str | None,
+    worker_instance_id: str | None,
+) -> None:
+    """Persist execution state only while this worker generation owns a live lease."""
+    timestamp = datetime.now(UTC)
+    statement = update(Job).where(
+        Job.id == job.id,
+        Job.state == JobState.RUNNING.value,
+    )
+    if worker_id is not None and worker_instance_id is not None:
+        statement = statement.where(
+            Job.claimed_by_worker_id == worker_id,
+            Job.claimed_by_instance_id == worker_instance_id,
+            Job.lease_expires_at.is_not(None),
+            Job.lease_expires_at > timestamp,
+        )
+    updated_id = db.execute(
+        statement.values(**values)
+        .returning(Job.id)
+        .execution_options(synchronize_session=False)
+    ).scalar_one_or_none()
+    if updated_id is None:
+        db.rollback()
+        raise JobLeaseLost("Job lease was lost while recording execution state")
+    db.commit()
+    db.refresh(job)
+
+
 async def process_next(
     db: Session,
     assignment: str,
@@ -77,8 +116,21 @@ async def process_next(
     worker_instance_id: str | None = None,
     shutdown_requested: Callable[[], bool] | None = None,
     render_profiles: RenderProfileConfigurationFile | None = None,
+    lease_seconds: float = 30,
 ) -> bool:
     """Admit, atomically claim, and process at most one exact-queue job."""
+    recoveries = reconcile_expired_job_leases(db)
+    for recovery in recoveries:
+        logger.error(
+            "expired_job_lease_reconciled",
+            job_id=recovery.job_id,
+            previous_state=recovery.previous_state.value,
+            recovered_state=recovery.recovered_state.value,
+            worker_id=recovery.worker_id,
+            worker_instance_id=recovery.worker_instance_id,
+            expired_at=recovery.expired_at.isoformat(),
+            retry_safe=False,
+        )
     lock = GPULock(str(physical_gpu)) if physical_gpu is not None else nullcontext()
     with lock:
         assigned_gpu_metrics: dict[str, object] | None = None
@@ -107,6 +159,7 @@ async def process_next(
             assignment,
             worker_id=worker_id,
             worker_instance_id=worker_instance_id,
+            lease_seconds=lease_seconds,
         )
         if job is None:
             return False
@@ -120,6 +173,8 @@ async def process_next(
                 assigned_gpu_metrics,
                 shutdown_requested,
                 render_profiles,
+                worker_id,
+                worker_instance_id,
             )
         finally:
             if worker_status is not None:
@@ -134,6 +189,8 @@ async def _process_claimed_job(
     assigned_gpu_metrics: dict[str, object] | None,
     shutdown_requested: Callable[[], bool] | None,
     render_profiles: RenderProfileConfigurationFile | None,
+    worker_id: str | None,
+    worker_instance_id: str | None,
 ) -> None:
     log_path: Path | None = None
     try:
@@ -145,11 +202,18 @@ async def _process_claimed_job(
             job,
             project,
             render_profiles,
+            worker_id=worker_id,
+            worker_instance_id=worker_instance_id,
         )
         finalization_execution: RenderFinalizationExecution | None = None
         music_asset: Asset | None = None
         if job.job_type == "mock_project_render":
-            finalization_execution = _resolve_render_finalization_execution(db, job)
+            finalization_execution = _resolve_render_finalization_execution(
+                db,
+                job,
+                worker_id=worker_id,
+                worker_instance_id=worker_instance_id,
+            )
             music_asset = revalidate_render_finalization(
                 db,
                 project,
@@ -163,8 +227,13 @@ async def _process_claimed_job(
             / "logs"
             / f"job-{job.id}-attempt-{job.attempt_number}.jsonl"
         )
-        job.log_path = str(log_path)
-        db.commit()
+        _update_owned_running_job(
+            db,
+            job,
+            {"log_path": str(log_path), "current_stage": "rendering"},
+            worker_id=worker_id,
+            worker_instance_id=worker_instance_id,
+        )
         append_job_log(
             log_path,
             "job_claimed",
@@ -183,24 +252,51 @@ async def _process_claimed_job(
             ),
             music_asset_id=music_asset.id if music_asset is not None else None,
         )
-        job.current_stage = "rendering"
-        db.commit()
         bind = db.get_bind()
         job_id = job.id
 
         def cancellation_requested() -> bool:
+            with Session(bind) as status_db:
+                row = status_db.execute(
+                    select(
+                        Job.state,
+                        Job.error_info,
+                        Job.claimed_by_worker_id,
+                        Job.claimed_by_instance_id,
+                        Job.lease_expires_at,
+                    ).where(Job.id == job_id)
+                ).one_or_none()
+            if row is None:
+                raise RuntimeError(f"Job disappeared while running: {job_id}")
+            state, persisted_error, claimed_worker, claimed_instance, lease_expires_at = row
+            if state in {JobState.CANCEL_REQUESTED.value, JobState.CANCELLED.value}:
+                return True
+            if state != JobState.RUNNING.value:
+                failure_kind = (
+                    persisted_error.get("failure_kind")
+                    if isinstance(persisted_error, dict)
+                    else None
+                )
+                raise JobLeaseLost(
+                    f"Job ownership was lost in state {state}; failure_kind={failure_kind}"
+                )
+            if worker_id is not None and worker_instance_id is not None:
+                if claimed_worker != worker_id or claimed_instance != worker_instance_id:
+                    raise JobLeaseLost("Job boot-generation ownership changed while running")
+                if lease_expires_at is None or _as_utc(lease_expires_at) <= datetime.now(UTC):
+                    raise JobLeaseLost("Job lease expired while work was running")
             if shutdown_requested is not None and shutdown_requested():
                 return True
-            with Session(bind) as status_db:
-                state = status_db.scalar(select(Job.state).where(Job.id == job_id))
-            if state is None:
-                raise RuntimeError(f"Job disappeared while running: {job_id}")
-            return state == JobState.CANCEL_REQUESTED.value
+            return False
 
         def report_progress(value: float, stage: str) -> None:
-            job.progress = value
-            job.current_stage = stage
-            db.commit()
+            _update_owned_running_job(
+                db,
+                job,
+                {"progress": value, "current_stage": stage},
+                worker_id=worker_id,
+                worker_instance_id=worker_instance_id,
+            )
             append_job_log(log_path, "progress", progress=value, stage=stage)
 
         def persist_profile_fallback(
@@ -208,11 +304,17 @@ async def _process_claimed_job(
             _error: ProviderOutOfMemoryError,
             _cleanup: ProviderCleanupResult,
         ) -> None:
-            job.payload = {
+            payload = {
                 **(job.payload or {}),
                 RENDER_PROFILE_EXECUTION_KEY: advanced.model_dump(mode="json"),
             }
-            db.commit()
+            _update_owned_running_job(
+                db,
+                job,
+                {"payload": payload},
+                worker_id=worker_id,
+                worker_instance_id=worker_instance_id,
+            )
             record = advanced.fallback_history[-1]
             _append_job_log_safely(
                 log_path,
@@ -308,7 +410,13 @@ async def _process_claimed_job(
             output_asset_id = output.id
         else:
             raise RuntimeError(f"Unsupported job type: {job.job_type}")
-        completion = mark_succeeded(db, job, [output_asset_id])
+        completion = mark_succeeded(
+            db,
+            job,
+            [output_asset_id],
+            worker_id=worker_id,
+            worker_instance_id=worker_instance_id,
+        )
         if completion is JobState.CANCEL_REQUESTED:
             raise PipelineCancelled("Cancellation requested before job completion")
         if completion is not JobState.SUCCEEDED:
@@ -321,8 +429,19 @@ async def _process_claimed_job(
         )
     except (PipelineCancelled, MediaCancelled):
         db.rollback()
-        _mark_chain_clip_terminal(db, job, cancelled=True)
-        state = mark_cancelled(db, job)
+        _mark_chain_clip_terminal(
+            db,
+            job,
+            cancelled=True,
+            worker_id=worker_id,
+            worker_instance_id=worker_instance_id,
+        )
+        state = mark_cancelled(
+            db,
+            job,
+            worker_id=worker_id,
+            worker_instance_id=worker_instance_id,
+        )
         if state is JobState.CANCELLED:
             _append_job_log_safely(log_path, "job_cancelled", job_id=job.id)
         else:
@@ -349,13 +468,31 @@ async def _process_claimed_job(
             job,
             cancelled=provider_cancelled,
             error_info=error_info,
+            worker_id=worker_id,
+            worker_instance_id=worker_instance_id,
         )
         if provider_cancelled:
-            state = mark_cancelled(db, job)
+            state = mark_cancelled(
+                db,
+                job,
+                worker_id=worker_id,
+                worker_instance_id=worker_instance_id,
+            )
         else:
-            state = mark_failed(db, job, error_info)
+            state = mark_failed(
+                db,
+                job,
+                error_info,
+                worker_id=worker_id,
+                worker_instance_id=worker_instance_id,
+            )
             if state is JobState.CANCEL_REQUESTED:
-                state = mark_cancelled(db, job)
+                state = mark_cancelled(
+                    db,
+                    job,
+                    worker_id=worker_id,
+                    worker_instance_id=worker_instance_id,
+                )
         if state is JobState.CANCELLED:
             _append_job_log_safely(
                 log_path,
@@ -401,6 +538,8 @@ def _mark_chain_clip_terminal(
     *,
     cancelled: bool,
     error_info: dict[str, object] | None = None,
+    worker_id: str | None = None,
+    worker_instance_id: str | None = None,
 ) -> None:
     if job.job_type != "video_chain_clip_generation":
         return
@@ -413,6 +552,28 @@ def _mark_chain_clip_terminal(
     clip = db.get(VideoChainClip, clip_id)
     if clip is None:
         return
+    current_job = db.get(Job, job.id)
+    if current_job is None:
+        return
+    if (
+        worker_id is not None
+        and worker_instance_id is not None
+        and (
+            current_job.claimed_by_worker_id != worker_id
+            or current_job.claimed_by_instance_id != worker_instance_id
+        )
+    ):
+        return
+    if current_job.state not in {
+        JobState.RUNNING.value,
+        JobState.CANCEL_REQUESTED.value,
+    }:
+        return
+    if worker_id is not None and (
+        current_job.lease_expires_at is None
+        or _as_utc(current_job.lease_expires_at) <= datetime.now(UTC)
+    ):
+        return
     clip.state = ChainClipState.CANCELLED.value if cancelled else ChainClipState.FAILED.value
     clip.failure_info = error_info or {}
     provider_error = (error_info or {}).get("provider_error")
@@ -423,11 +584,18 @@ def _mark_chain_clip_terminal(
     db.commit()
 
 
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
 def _resolve_render_profile_execution(
     db: Session,
     job: Job,
     project: Project,
     render_profiles: RenderProfileConfigurationFile | None,
+    *,
+    worker_id: str | None,
+    worker_instance_id: str | None,
 ) -> RenderProfileExecution:
     payload = job.payload or {}
     if RENDER_PROFILE_EXECUTION_KEY in payload:
@@ -437,28 +605,43 @@ def _resolve_render_profile_execution(
         get_settings().render_profile_config
     )
     execution = RenderProfileExecution.resolve(profiles, project.resolution_profile)
-    job.payload = {
+    updated_payload = {
         **payload,
         RENDER_PROFILE_EXECUTION_KEY: execution.model_dump(mode="json"),
     }
-    db.commit()
+    _update_owned_running_job(
+        db,
+        job,
+        {"payload": updated_payload},
+        worker_id=worker_id,
+        worker_instance_id=worker_instance_id,
+    )
     return execution
 
 
 def _resolve_render_finalization_execution(
     db: Session,
     job: Job,
+    *,
+    worker_id: str | None,
+    worker_instance_id: str | None,
 ) -> RenderFinalizationExecution:
     payload = job.payload or {}
     if RENDER_FINALIZATION_EXECUTION_KEY in payload:
         return render_finalization_execution_from_payload(payload)
 
     execution = RenderFinalizationExecution.compatibility_default()
-    job.payload = {
+    updated_payload = {
         **payload,
         RENDER_FINALIZATION_EXECUTION_KEY: execution.model_dump(mode="json"),
     }
-    db.commit()
+    _update_owned_running_job(
+        db,
+        job,
+        {"payload": updated_payload},
+        worker_id=worker_id,
+        worker_instance_id=worker_instance_id,
+    )
     return execution
 
 
@@ -481,6 +664,7 @@ async def loop(device: str, poll_seconds: float = 1, *, once: bool = False) -> N
         configuration.id,
         configuration.assignment,
         heartbeat_seconds=settings.worker_heartbeat_seconds,
+        lease_seconds=settings.job_lease_seconds,
     )
     with reporter:
         while not stopped:
@@ -497,6 +681,7 @@ async def loop(device: str, poll_seconds: float = 1, *, once: bool = False) -> N
                     worker_instance_id=reporter.instance_id,
                     shutdown_requested=lambda: stopped,
                     render_profiles=render_profiles,
+                    lease_seconds=settings.job_lease_seconds,
                 )
             if once:
                 return

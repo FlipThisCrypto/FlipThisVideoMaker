@@ -13,7 +13,56 @@ from flipthis_video_maker.database.session import get_db
 from flipthis_video_maker.domain.enums import JobState, WorkerState
 from flipthis_video_maker.domain.models import Candidate, Job
 from flipthis_video_maker.main import create_app
+from flipthis_video_maker.pipeline.mock_pipeline import create_sample
 from flipthis_video_maker.services.workers import register_worker, update_worker_status
+
+
+@pytest.mark.asyncio
+async def test_orphaned_job_retry_requires_explicit_api_acknowledgement(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    project = create_sample(db, tmp_path / "project")
+    job = Job(
+        job_type="mock_project_render",
+        project_id=project.id,
+        gpu_assignment="cpu",
+        state=JobState.FAILED.value,
+        attempt_number=1,
+        claimed_by_worker_id="cpu",
+        claimed_by_instance_id="expired-generation",
+        error_info={
+            "failure_kind": "orphaned_worker_lease",
+            "retry_safe": False,
+        },
+    )
+    db.add(job)
+    db.commit()
+    app = create_app()
+
+    def database_override() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = database_override
+    app.dependency_overrides[get_settings] = lambda: Settings(data_dir=tmp_path / "projects")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        exposed = await client.get(f"/api/v1/jobs/{job.id}")
+        rejected = await client.post(f"/api/v1/jobs/{job.id}/retry")
+        accepted = await client.post(
+            f"/api/v1/jobs/{job.id}/retry",
+            params={"acknowledge_orphan_risk": "true"},
+        )
+
+    assert exposed.status_code == 200
+    assert exposed.json()["claimed_by_worker_id"] == "cpu"
+    assert exposed.json()["claimed_by_instance_id"] == "expired-generation"
+    assert rejected.status_code == 409
+    assert "acknowledgement" in rejected.json()["detail"]
+    assert accepted.status_code == 200
+    db.refresh(job)
+    assert job.state == JobState.QUEUED.value
+    assert job.claimed_by_worker_id is None
 
 
 @pytest.mark.asyncio
