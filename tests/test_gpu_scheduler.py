@@ -217,3 +217,69 @@ def test_missing_physical_gpu_fails_closed() -> None:
     assert not decision.admitted
     assert decision.observed_free_vram_mb is None
     assert decision.reason == "physical_gpu_not_found"
+
+
+def _metrics(used0: int, used1: int) -> gpu.GPUProbeResult:
+    return gpu.GPUProbeResult(
+        metrics=tuple(
+            gpu.GPUMetrics(
+                index=index,
+                name=f"GPU {index}",
+                temperature_c=40 + index + used // 100,
+                utilization_percent=min(100, used // 10),
+                memory_total_mb=12000,
+                memory_used_mb=used,
+                memory_free_mb=12000 - used,
+            )
+            for index, used in ((0, used0), (1, used1))
+        )
+    )
+
+
+def test_telemetry_records_only_selected_physical_gpu_peak_and_baseline() -> None:
+    probes = iter((_metrics(9000, 100), _metrics(11000, 500), _metrics(10000, 300)))
+    recorder = gpu.GPUTelemetryRecorder(
+        1,
+        sample_interval_seconds=60,
+        probe=lambda: next(probes),
+    ).start()
+
+    recorder.set_stage("interpolating")
+    recorder.sample_now()
+    recorder.set_stage("encoding")
+    recorder.sample_now()
+    snapshot = recorder.stop()
+
+    assert snapshot.available
+    assert snapshot.physical_gpu == 1
+    assert snapshot.sample_count == 3
+    assert snapshot.failed_sample_count == 0
+    assert snapshot.observed_mean_period_seconds is not None
+    assert 0 < snapshot.sampling_coverage_ratio <= 1
+    assert snapshot.memory_total_mb == 12000
+    assert snapshot.baseline_memory_used_mb == 100
+    assert snapshot.peak_memory_used_mb == 500
+    assert snapshot.peak_stage_delta_mb == 400
+    assert snapshot.peak_utilization_percent == 50
+    assert snapshot.peak_temperature_c == 46
+    assert snapshot.stages["initializing"]["sample_count"] == 1
+    assert snapshot.stages["interpolating"]["peak_memory_used_mb"] == 500
+    assert snapshot.stages["encoding"]["peak_memory_used_mb"] == 300
+
+
+def test_telemetry_reports_probe_failure_without_fabricated_metrics() -> None:
+    recorder = gpu.GPUTelemetryRecorder(
+        0,
+        sample_interval_seconds=60,
+        probe=lambda: gpu.GPUProbeResult(error="private driver diagnostic"),
+    ).start()
+
+    snapshot = recorder.stop()
+
+    assert not snapshot.available
+    assert snapshot.sample_count == 0
+    assert snapshot.failed_sample_count == 1
+    assert snapshot.sampling_coverage_ratio == 1
+    assert snapshot.peak_memory_used_mb is None
+    assert snapshot.error_code == "gpu_probe_failed_or_device_missing"
+    assert "private" not in snapshot.model_dump_json()

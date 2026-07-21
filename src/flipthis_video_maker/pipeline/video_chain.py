@@ -35,6 +35,7 @@ from flipthis_video_maker.providers.registry import (
     configured_interpolation_provider,
     configured_lip_sync_provider,
 )
+from flipthis_video_maker.scheduler.gpu import GPUTelemetryRecorder
 from flipthis_video_maker.services.asset_inputs import validated_asset_input
 from flipthis_video_maker.services.video_chains import (
     SUPPORTED_KEYFRAME_MIME_TYPES,
@@ -80,6 +81,7 @@ class VideoChainPipeline:
         interpolation_provider: InterpolationRunner | None = None,
         lip_sync_provider: LipSyncRunner | None = None,
         perceptual_metric_provider: PerceptualMetricRunner | None = None,
+        gpu_telemetry: GPUTelemetryRecorder | None = None,
         cancel_requested: CancelCheck | None = None,
         progress: ProgressCallback | None = None,
     ) -> None:
@@ -88,6 +90,7 @@ class VideoChainPipeline:
         self.interpolation_provider = interpolation_provider
         self.lip_sync_provider = lip_sync_provider
         self.perceptual_metric_provider = perceptual_metric_provider
+        self.gpu_telemetry = gpu_telemetry
         self.cancel_requested = cancel_requested
         self.progress = progress
 
@@ -118,6 +121,7 @@ class VideoChainPipeline:
         provider_run: ProviderRunOutput
         native_asset = self._existing_asset(project, clip.native_video_asset_id, "video/mp4")
         if native_asset is None:
+            self._set_telemetry_stage("generating")
             clip.state = ChainClipState.GENERATING.value
             self.db.commit()
             native_path = root / f"native-provider-output-{uuid.uuid4().hex}.mp4"
@@ -173,6 +177,7 @@ class VideoChainPipeline:
         audio_asset: Asset | None = None
         audio_path: Path | None = None
         if request.lip_sync_mode is not LipSyncMode.SKIP:
+            self._set_telemetry_stage("lip_syncing")
             if request.lip_sync_mode is not LipSyncMode.LATENTSYNC:
                 raise RuntimeError("The selected integrated lip-sync mode is not implemented")
             if request.audio_reference_asset_id is None or not request.lip_sync_provider_id:
@@ -286,6 +291,7 @@ class VideoChainPipeline:
         self._check_cancelled()
         delivery_asset = self._existing_asset(project, clip.delivery_video_asset_id, "video/mp4")
         if delivery_asset is None:
+            self._set_telemetry_stage("interpolating_and_encoding")
             clip.state = ChainClipState.INTERPOLATING.value
             self.db.commit()
             stage_version = uuid.uuid4().hex
@@ -410,6 +416,7 @@ class VideoChainPipeline:
             self.db.commit()
 
         self._check_cancelled()
+        self._set_telemetry_stage("validating")
         clip.state = ChainClipState.VALIDATING.value
         self.db.commit()
         # A failed QA attempt may already have registered some evidence before the
@@ -526,6 +533,7 @@ class VideoChainPipeline:
             Path(native_asset.file_path),
             cancel_requested=self.cancel_requested,
         )
+        gpu_snapshot = self.gpu_telemetry.snapshot() if self.gpu_telemetry is not None else None
         result = FirstLastFrameGenerationResult(
             request_digest=request.digest(),
             provider_job_id=provider_run.provider_job_id,
@@ -573,9 +581,14 @@ class VideoChainPipeline:
                     0.0,
                     (utc_now() - provider_run.submitted_at).total_seconds(),
                 ),
-                "gpu_measurements_available": False,
-                "gpu_measurements_reason": (
-                    "No stage-scoped CUDA telemetry collector is installed"
+                "gpu_measurements_available": gpu_snapshot is not None and gpu_snapshot.available,
+                "gpu_telemetry": (
+                    gpu_snapshot.model_dump(mode="json")
+                    if gpu_snapshot is not None
+                    else {
+                        "available": False,
+                        "error_code": "cpu_or_telemetry_not_configured",
+                    }
                 ),
             },
             warnings=provider_run.warnings
@@ -669,6 +682,10 @@ class VideoChainPipeline:
             from flipthis_video_maker.pipeline.mock_pipeline import PipelineCancelled
 
             raise PipelineCancelled("Video chain generation cancelled")
+
+    def _set_telemetry_stage(self, stage: str) -> None:
+        if self.gpu_telemetry is not None:
+            self.gpu_telemetry.set_stage(stage)
 
 
 __all__ = ["FirstLastFrameRunner", "InterpolationRunner", "VideoChainPipeline"]

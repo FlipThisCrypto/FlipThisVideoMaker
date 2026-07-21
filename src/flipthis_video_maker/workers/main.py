@@ -50,6 +50,7 @@ from flipthis_video_maker.providers.registry import (
 )
 from flipthis_video_maker.scheduler.gpu import (
     GPULock,
+    GPUTelemetryRecorder,
     evaluate_vram_admission,
     probe_gpus,
 )
@@ -187,6 +188,7 @@ async def process_next(
                 job,
                 assignment,
                 assigned_gpu_metrics,
+                physical_gpu,
                 shutdown_requested,
                 render_profiles,
                 worker_id,
@@ -203,6 +205,7 @@ async def _process_claimed_job(
     job: Job,
     assignment: str,
     assigned_gpu_metrics: dict[str, object] | None,
+    physical_gpu: int | None,
     shutdown_requested: Callable[[], bool] | None,
     render_profiles: RenderProfileConfigurationFile | None,
     worker_id: str | None,
@@ -556,13 +559,26 @@ async def _process_claimed_job(
                 if metric_provider_id
                 else None
             )
-            output = await VideoChainPipeline(
-                db,
-                provider=provider,
-                perceptual_metric_provider=metric_provider,
-                cancel_requested=cancellation_requested,
-                progress=report_progress,
-            ).run(project, clip)
+            telemetry = (
+                GPUTelemetryRecorder(physical_gpu).start() if physical_gpu is not None else None
+            )
+            try:
+                output = await VideoChainPipeline(
+                    db,
+                    provider=provider,
+                    perceptual_metric_provider=metric_provider,
+                    gpu_telemetry=telemetry,
+                    cancel_requested=cancellation_requested,
+                    progress=report_progress,
+                ).run(project, clip)
+            finally:
+                if telemetry is not None:
+                    telemetry_result = telemetry.stop()
+                    _append_job_log_safely(
+                        log_path,
+                        "gpu_telemetry_complete",
+                        **telemetry_result.model_dump(mode="json"),
+                    )
             output_asset_id = output.id
 
             def finalize_automated_clip() -> object:

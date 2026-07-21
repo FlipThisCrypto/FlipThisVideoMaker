@@ -11,6 +11,9 @@ assembly.
 - CPU, GPU 0, and GPU 1 workers claim only their exact queue assignment. GPU workers set
   `CUDA_VISIBLE_DEVICES` before doing work. They lock one configured physical device, evaluate only
   that device's VRAM, and claim only after admission succeeds.
+- A claimed GPU video Job samples only its configured physical device. Immutable results retain
+  baseline/peak VRAM, utilization, temperature, stage labels, failures, cadence, and coverage; the
+  two cards are never summed.
 - Worker process generations publish persistent heartbeats from a separate thread. Boot tokens stop
   an old process from overwriting a restarted worker. Owned Jobs carry a separately renewed bounded
   lease; expiry is reconciled to a terminal unsafe-orphan result rather than blindly requeued.

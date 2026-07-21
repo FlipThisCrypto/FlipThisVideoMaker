@@ -32,6 +32,11 @@ from flipthis_video_maker.providers.base.video_generation import (
     ResolvedFirstLastFrameRequest,
 )
 from flipthis_video_maker.providers.latentsync.cli import LipSyncRunOutput
+from flipthis_video_maker.scheduler.gpu import (
+    GPUMetrics,
+    GPUProbeResult,
+    GPUTelemetryRecorder,
+)
 from flipthis_video_maker.services.video_chains import (
     accept_chain_clip,
     assemble_video_chain,
@@ -245,11 +250,32 @@ async def test_two_clip_pipeline_reuses_actual_last_frame_and_trims_shared_bound
         _request(assets[0].id, assets[1].id),
     )
     perceptual_metric = FixturePerceptualMetric()
-    await VideoChainPipeline(
-        db,
-        provider=FixtureMotionProvider(),
-        perceptual_metric_provider=perceptual_metric,
-    ).run(project, first)
+    telemetry = GPUTelemetryRecorder(
+        1,
+        sample_interval_seconds=60,
+        probe=lambda: GPUProbeResult(
+            metrics=(
+                GPUMetrics(
+                    index=1,
+                    name="fixture GPU",
+                    temperature_c=42,
+                    utilization_percent=75,
+                    memory_total_mb=12282,
+                    memory_used_mb=4321,
+                    memory_free_mb=7961,
+                ),
+            )
+        ),
+    ).start()
+    try:
+        await VideoChainPipeline(
+            db,
+            provider=FixtureMotionProvider(),
+            perceptual_metric_provider=perceptual_metric,
+            gpu_telemetry=telemetry,
+        ).run(project, first)
+    finally:
+        telemetry.stop()
 
     assert first.state == ChainClipState.AWAITING_REVIEW.value
     assert first.native_video_asset_id is not None
@@ -279,6 +305,9 @@ async def test_two_clip_pipeline_reuses_actual_last_frame_and_trims_shared_bound
         },
     }
     assert len(perceptual_metric.calls) == 2
+    assert first.result_snapshot["resource_usage"]["gpu_measurements_available"] is True
+    assert first.result_snapshot["resource_usage"]["gpu_telemetry"]["physical_gpu"] == 1
+    assert first.result_snapshot["resource_usage"]["gpu_telemetry"]["peak_memory_used_mb"] == 4321
     first_delivery = db.get(Asset, first.delivery_video_asset_id)
     assert first_delivery is not None
     first_facts = inspect_frame_timing(Path(first_delivery.file_path))

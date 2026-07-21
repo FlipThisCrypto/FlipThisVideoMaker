@@ -178,6 +178,8 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
   model-parallel claim is made.
 - RIFE/LatentSync inherit the one worker-visible GPU and never invent an upstream device flag.
 - Wan2.2 FLF and RIFE CUDA workloads were exercised on GPU 1. LatentSync remains unmeasured.
+- GPU video Jobs sample the claimed physical device through their pipeline and persist overall plus
+  per-stage VRAM/utilization/temperature evidence with observed cadence and coverage.
 
 ## Validation matrix
 
@@ -188,10 +190,10 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Ruff / formatting / strict MyPy | Passed; 112 files formatted, 69 source files type-checked |
 | Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
 | Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
-| Complete pytest | Passed; 186 tests in 114.78 seconds |
+| Complete pytest | Passed; 188 tests in 114.96 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
 | Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 23.6 seconds |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.3 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Local Wan2.2 health | Passed on ComfyUI v0.9.2, GPU 1 isolated as the sole visible RTX 4070, all required nodes/models present |
 | Local 24-fps generation | Failed honestly: 241 frames at 854×480 exhausted the GPU's 11.6 GiB usable VRAM under both low and maximum offload; structured OOM classification passed and no output was published |
@@ -201,14 +203,16 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Exact delivery | Passed technical timing: H.264 High/yuv420p, 10.000 s, CFR 60 fps, exactly 600 unique decoded frames; uniformly dropped 41 internal frames and retained decoded native frames 0 and 80 as delivery frames 0 and 599. SHA-256 `534f19e5ecde2b0c1ecdcb1e45172a654851ec252c7389737c336ae05d6b7b0a` |
 | Delivery boundary QA | **Passed:** start MAE 0.0191 / SSIM 0.9960; end MAE 0.0318 / SSIM 0.9966; penultimate-to-final MAE 0.0016; no snap or duplicate/frozen run detected |
 | Local LPIPS 0.1/AlexNet | Passed live CPU health and strict output validation. Real delivery: start distance 0.04379, end 0.02790, identical-frame control approximately zero. Persisted temporary report SHA-256 `6adf832fcf462c6385d6d7682e6edf1dd978db05df80c3e1416af6225a4c3902` |
+| Physical-GPU telemetry | Exercised on GPU 1 during real RIFE: 19.79 s, 143 samples, observed mean period 139 ms / coverage 72.2%, baseline 18 MiB, peak 815 MiB, stage delta 797 MiB, peak utilization 48%, peak temperature 53 C, zero failed samples |
 | Visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; not evidence of live-action quality or a production pass |
 
 ## Known limitations and blockers
 
 1. The Definition of Done's real visual acceptance is not met. The first native artifact converged
    on both boundaries but visibly slid/morphed and duplicated its subject near the ending.
-2. LatentSync is not installed at its configured path. RIFE was exercised only on GPU 1; independent
-   GPU 0 and simultaneous dual-queue behavior remain unmeasured.
+2. LatentSync is not installed at its configured path. RIFE and telemetry were exercised only on GPU
+   1; independent GPU 0 and simultaneous dual-queue behavior remain unmeasured. Sampling can miss
+   allocations shorter than the observed probe cadence.
 3. LPIPS is exercised but diagnostic pending representative threshold calibration. A privacy-reviewed
    identity similarity provider is not installed. Torchvision's AlexNet pretrained-weight terms also
    require intended-use review because torchvision disclaims blanket permission for pretrained models.

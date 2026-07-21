@@ -1,6 +1,10 @@
 import json
 import shutil
 import subprocess
+import threading
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -33,6 +37,153 @@ class GPUProbeResult(BaseModel):
         if len(indexes) != len(set(indexes)):
             raise ValueError("GPU probe returned duplicate physical indexes")
         return self
+
+
+class GPUTelemetrySnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    available: bool
+    physical_gpu: int = Field(ge=0)
+    started_at: datetime
+    elapsed_seconds: float = Field(ge=0)
+    sample_interval_seconds: float = Field(gt=0)
+    sample_count: int = Field(ge=0)
+    failed_sample_count: int = Field(ge=0)
+    observed_mean_period_seconds: float | None = Field(default=None, ge=0)
+    sampling_coverage_ratio: float = Field(ge=0, le=1)
+    memory_total_mb: int | None = Field(default=None, ge=0)
+    baseline_memory_used_mb: int | None = Field(default=None, ge=0)
+    peak_memory_used_mb: int | None = Field(default=None, ge=0)
+    peak_stage_delta_mb: int | None = Field(default=None, ge=0)
+    peak_utilization_percent: int | None = Field(default=None, ge=0)
+    peak_temperature_c: int | None = None
+    error_code: str | None = None
+    stages: dict[str, dict[str, int]] = Field(default_factory=dict)
+
+
+class GPUTelemetryRecorder:
+    """Sample one physical GPU without pooling or remapping device memory."""
+
+    def __init__(
+        self,
+        physical_gpu: int,
+        *,
+        sample_interval_seconds: float = 0.1,
+        probe: Callable[[], GPUProbeResult] | None = None,
+    ) -> None:
+        if physical_gpu < 0 or sample_interval_seconds < 0.05:
+            raise ValueError("Telemetry requires a physical GPU and interval of at least 0.05 s")
+        self.physical_gpu = physical_gpu
+        self.sample_interval_seconds = sample_interval_seconds
+        self._probe = probe or probe_gpus
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._started_at: datetime | None = None
+        self._started_monotonic: float | None = None
+        self._stopped_monotonic: float | None = None
+        self._samples: list[tuple[str, GPUMetrics]] = []
+        self._failed_samples = 0
+        self._stage = "initializing"
+
+    def start(self) -> "GPUTelemetryRecorder":
+        if self._thread is not None:
+            raise RuntimeError("GPU telemetry is already started")
+        self._started_at = datetime.now(UTC)
+        self._started_monotonic = time.monotonic()
+        self.sample_now()
+        self._thread = threading.Thread(target=self._sample_loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def sample_now(self) -> None:
+        probe = self._probe()
+        metric = next(
+            (item for item in probe.metrics if item.index == self.physical_gpu),
+            None,
+        )
+        with self._lock:
+            if probe.error is not None or metric is None:
+                self._failed_samples += 1
+            else:
+                self._samples.append((self._stage, metric))
+
+    def set_stage(self, stage: str) -> None:
+        if not stage or len(stage) > 80:
+            raise ValueError("Telemetry stage must be a non-empty bounded label")
+        with self._lock:
+            self._stage = stage
+
+    def stop(self) -> GPUTelemetrySnapshot:
+        if self._thread is None:
+            raise RuntimeError("GPU telemetry was not started")
+        self._stop.set()
+        self._thread.join(timeout=12)
+        if self._thread.is_alive():
+            with self._lock:
+                self._failed_samples += 1
+        self._stopped_monotonic = time.monotonic()
+        return self.snapshot()
+
+    def snapshot(self) -> GPUTelemetrySnapshot:
+        if self._started_at is None or self._started_monotonic is None:
+            raise RuntimeError("GPU telemetry was not started")
+        ended = self._stopped_monotonic or time.monotonic()
+        with self._lock:
+            samples = tuple(self._samples)
+            failures = self._failed_samples
+        elapsed = max(0, ended - self._started_monotonic)
+        attempts = len(samples) + failures
+        expected_attempts = max(1, int(elapsed / self.sample_interval_seconds) + 1)
+        coverage = min(1.0, attempts / expected_attempts)
+        mean_period = elapsed / (attempts - 1) if attempts > 1 else None
+        if not samples:
+            return GPUTelemetrySnapshot(
+                available=False,
+                physical_gpu=self.physical_gpu,
+                started_at=self._started_at,
+                elapsed_seconds=elapsed,
+                sample_interval_seconds=self.sample_interval_seconds,
+                sample_count=0,
+                failed_sample_count=failures,
+                observed_mean_period_seconds=mean_period,
+                sampling_coverage_ratio=coverage,
+                error_code="gpu_probe_failed_or_device_missing",
+            )
+        metrics = tuple(item for _stage, item in samples)
+        baseline = metrics[0].memory_used_mb
+        peak = max(item.memory_used_mb for item in metrics)
+        stages: dict[str, dict[str, int]] = {}
+        for stage in dict.fromkeys(stage for stage, _item in samples):
+            stage_metrics = [item for sample_stage, item in samples if sample_stage == stage]
+            stages[stage] = {
+                "sample_count": len(stage_metrics),
+                "peak_memory_used_mb": max(item.memory_used_mb for item in stage_metrics),
+                "peak_utilization_percent": max(item.utilization_percent for item in stage_metrics),
+                "peak_temperature_c": max(item.temperature_c for item in stage_metrics),
+            }
+        return GPUTelemetrySnapshot(
+            available=True,
+            physical_gpu=self.physical_gpu,
+            started_at=self._started_at,
+            elapsed_seconds=elapsed,
+            sample_interval_seconds=self.sample_interval_seconds,
+            sample_count=len(samples),
+            failed_sample_count=failures,
+            observed_mean_period_seconds=mean_period,
+            sampling_coverage_ratio=coverage,
+            memory_total_mb=metrics[0].memory_total_mb,
+            baseline_memory_used_mb=baseline,
+            peak_memory_used_mb=peak,
+            peak_stage_delta_mb=max(0, peak - baseline),
+            peak_utilization_percent=max(item.utilization_percent for item in metrics),
+            peak_temperature_c=max(item.temperature_c for item in metrics),
+            stages=stages,
+        )
+
+    def _sample_loop(self) -> None:
+        while not self._stop.wait(self.sample_interval_seconds):
+            self.sample_now()
 
 
 AdmissionReason = Literal[

@@ -73,7 +73,9 @@ uv run flipthis-worker --device gpu1
 ```
 
 They treat each physical GPU independently and leave jobs queued when that device does not meet the
-configured free-VRAM reserve. Starting a GPU worker does not install or exercise a model backend.
+configured free-VRAM reserve. Each GPU video Job records sampled baseline/peak VRAM, utilization,
+temperature, stage, and coverage for that physical card only. Starting a GPU worker does not install
+or exercise a model backend.
 
 ## Validation
 

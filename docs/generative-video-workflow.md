@@ -6,6 +6,7 @@
   publication, local Wan protocol fixtures, and deterministic two-clip integration: **Exercised**.
 - Local Wan and Practical-RIFE runtimes: **Exercised**. LatentSync: **Implemented, unexercised**.
 - Local LPIPS boundary QA runtime and persisted report integration: **Exercised**.
+- Per-physical-GPU pipeline telemetry and stage provenance: **Exercised** on GPU 1 with RIFE.
 - Immutable next-target request/Job/Asset generation and deterministic/CLI fixtures: **Exercised**.
 - Playback-aware replenishment with deterministic target/video providers: **Exercised**.
 - Real target-image model and sustainable real-time replenishment: **Implemented, unexercised**.
