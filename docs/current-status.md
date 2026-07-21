@@ -11,7 +11,9 @@ and exercised with deterministic CPU protocol/integration fixtures. LTX-2.3 Pro,
 Practical-RIFE 4.25, and LatentSync 1.5 integrations are implemented but have not been exercised
 against live services, model weights, or CUDA. Production visual quality is therefore not proven.
 Continuity-aware target-frame Jobs are exercised with deterministic and safe CLI fixtures; no real
-target-image model is installed.
+target-image model is installed. A durable playback-aware replenishment controller is exercised
+with deterministic providers, including concurrent claim, restart reconciliation, failure stop,
+QA-gated auto-acceptance, and playback-triggered scheduling.
 
 This file is the authoritative handoff. The durable product goal is in `MEMORY.md`; architecture
 decision ADR 0010 and `docs/provider-decision.md` record the selected current stack.
@@ -47,7 +49,10 @@ chain enqueue discovers and health-checks only a true category-5 provider plus a
   actual boundary Assets, predecessor and lineage, immutable snapshots, stage/result Assets, review
   state, Job/provider IDs, warnings, and failure data.
 - Alembic revision `0005` adds indexed worker/boot-generation ownership and renewable lease
-  timestamps to Jobs. Empty upgrade, downgrade to `0004`, re-upgrade, and schema drift checks pass.
+  timestamps to Jobs.
+- Alembic revision `0006` adds the immutable automation policy, one replenishment-Job ownership
+  slot, and durable playback position to chains. Empty upgrade through `0006`, downgrade to `0005`,
+  re-upgrade, and schema drift checks pass.
 - A database uniqueness boundary prevents two conflicting successors in one lineage. Regeneration
   from an earlier accepted clip creates a new lineage. Failed clips retry without modifying accepted
   predecessors.
@@ -126,8 +131,13 @@ is unexercised.
   sustainable real-time factor, whether observed generation keeps up, and exhaustion behavior.
   Exhaustion is `pause_playback_and_rebuffer`.
 - Pause, resume, cancellation, publication, playlist, and validated segment APIs exist.
-- Automatic scheduling of target creation and continuous asynchronous buffer replenishment remain Planned;
-  this is extensible buffered delivery, not a claim of literal infinity.
+- Automatic chains can capture a versioned target-generation policy and explicitly opt into
+  accepting only full-QA-passing clips. An event-driven controller maintains one target/successor
+  operation, computes remaining published buffer from durable playback position, publishes accepted
+  output atomically, and reconciles completed target Jobs after restart. Terminal target failure
+  stops for operator retry instead of spawning replacement work.
+- The deterministic controller is Exercised; real sustainable generation is unproven. This remains
+  extensible buffered delivery, not a claim of literal infinity.
 
 ## Target-frame generation
 
@@ -149,7 +159,8 @@ capability and authenticated-health gating, profile/GPU selection, fixed deliver
 speaking-shot classification/audio upload/LatentSync gating, lifecycle states, requested versus
 actual boundary comparison, video review, accept/reject/retry, assembly, HLS publication,
 pause/resume/cancel, and full request/provenance/QA inspection. Unsupported provider combinations are
-disabled or explained.
+disabled or explained. Automatic chains can configure the captured target provider/model/prompt,
+explicit QA auto-accept policy, GPU queue, and playback position reporting from the HLS player.
 
 The older storyboard/candidate/render/finalization workflow remains compatible and exercised.
 
@@ -172,14 +183,14 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Check | Latest observed result |
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
-| Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0005`, downgrade to `0004`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, four lease columns |
-| Ruff / formatting / strict MyPy | Passed; 102 files formatted, 65 source files type-checked |
-| Focused Job ownership/recovery tests | Passed; 45 Job, worker, API, and chain-contract tests |
-| Focused target/provider/API tests | Passed; 24 target, CLI failure, registry, and chain API tests |
-| Complete pytest | Passed; 163 tests in 118.02 seconds |
+| Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0006`, downgrade to `0005`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, revision `0006` |
+| Ruff / formatting / strict MyPy | Passed; 105 files formatted, 66 source files type-checked |
+| Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
+| Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
+| Complete pytest | Passed; 172 tests in 111.66 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
-| Frontend Vitest / lint / build | Passed; 14 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 24.8 seconds |
+| Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.9 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Real backend acceptance | **Blocked: no hosted credential or external RIFE/LatentSync runtime available** |
 
@@ -192,8 +203,8 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 3. LPIPS and privacy-reviewed identity similarity are not installed. Current perceptual evidence is
    dHash plus SSIM/MAE/RMSE.
 4. Hosted generation cannot be remotely cancelled through the reviewed APIs.
-5. Automatic scheduling of implemented target generation and autonomous playback-aware streaming
-   replenishment are not implemented.
+5. Autonomous replenishment is exercised only with deterministic providers. Real provider latency,
+   cost, HLS browser support, buffer sizing, and sustainable real-time factor are not proven.
 6. PostgreSQL `SKIP LOCKED`, distributed admission, and enforced configured worker concurrency
    remain absent. Current leases are a single-host SQLite safety boundary.
 7. Authentication remains local-only by default. Do not expose the service publicly as-is.
@@ -208,5 +219,5 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 3. Exercise one independent RIFE workload on each RTX 4070, then LatentSync 1.5 on eligible dialogue;
    record peak VRAM and cleanup behavior.
 4. Add LPIPS and a privacy-reviewed opt-in identity metric as isolated QA providers.
-5. Implement automatic next-target generation and a replenishment controller only after measured
-   real-time factor and buffer sizing are available.
+5. Measure the replenishment controller with the real two-clip run, then tune the buffer target and
+   add a cross-browser HLS client only if native playback evidence requires it.

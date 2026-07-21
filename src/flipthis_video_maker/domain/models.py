@@ -281,6 +281,12 @@ class VideoChain(Base, TimestampMixin):
         ForeignKey("assets.id", ondelete="SET NULL")
     )
     stream_state: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    automation_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    replenishment_job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL"), unique=True
+    )
+    playback_position_seconds: Mapped[float] = mapped_column(Float, default=0)
+    playback_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     clips: Mapped[list["VideoChainClip"]] = relationship(
         cascade="all, delete-orphan",
         order_by="VideoChainClip.sequence_number, VideoChainClip.revision",

@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createVideoChainClip,
+  configureChainAutomation,
   generateVideoChainTarget,
+  reportChainPlayback,
   retryVideoChainClip,
 } from "./videoChains";
 
@@ -96,5 +98,37 @@ describe("video-chain API", () => {
       expect.objectContaining({ method: "POST", body: JSON.stringify(request) }),
     );
     expect(JSON.stringify(request)).not.toContain("/home/");
+  });
+
+  it("configures explicit QA automation and reports playback consumption", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() => response({ id: "chain-1", stream_state: {} }));
+    const policy = {
+      enabled: true,
+      auto_accept_qa_passed: true,
+      target_provider_id: "target-image-cli",
+      target_provider_model: "exact-model-v1",
+      target_prompt: "Continue the coherent live scene.",
+      target_seed_base: 1000,
+      gpu_assignment: "gpu1" as const,
+    };
+
+    await configureChainAutomation("chain-1", policy);
+    await reportChainPlayback("chain-1", 12);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/video-chains/chain-1/automation",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify(policy) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/video-chains/chain-1/stream/playback",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ position_seconds: 12 }),
+      }),
+    );
   });
 });

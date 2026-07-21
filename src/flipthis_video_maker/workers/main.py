@@ -30,7 +30,7 @@ from flipthis_video_maker.config.workers import load_worker_configuration
 from flipthis_video_maker.contracts.video_generation import FirstLastFrameGenerationRequest
 from flipthis_video_maker.database.session import SessionLocal
 from flipthis_video_maker.domain.enums import JobState, WorkerState
-from flipthis_video_maker.domain.models import Asset, Job, Project
+from flipthis_video_maker.domain.models import Asset, Job, Project, VideoChain, VideoChainClip
 from flipthis_video_maker.media.ffmpeg import MediaCancelled
 from flipthis_video_maker.pipeline.mock_pipeline import MockPipeline, PipelineCancelled
 from flipthis_video_maker.pipeline.shot_regeneration import MockShotRegenerator
@@ -53,6 +53,10 @@ from flipthis_video_maker.scheduler.gpu import (
     probe_gpus,
 )
 from flipthis_video_maker.services.asset_inputs import validated_asset_input
+from flipthis_video_maker.services.chain_automation import (
+    auto_accept_publish_and_replenish,
+    continue_after_generated_target,
+)
 from flipthis_video_maker.services.job_logs import append_job_log
 from flipthis_video_maker.services.jobs import (
     claim_next,
@@ -204,6 +208,8 @@ async def _process_claimed_job(
     worker_instance_id: str | None,
 ) -> None:
     log_path: Path | None = None
+    post_success: Callable[[], object] | None = None
+    post_success_chain: VideoChain | None = None
     try:
         project = db.get(Project, job.project_id)
         if project is None:
@@ -390,8 +396,6 @@ async def _process_claimed_job(
             output_asset_id = candidate.output_asset_id
         elif job.job_type == "video_chain_target_generation":
             target_request = target_request_from_job(job)
-            from flipthis_video_maker.domain.models import VideoChain, VideoChainClip
-
             chain = db.get(VideoChain, target_request.chain_id)
             if chain is None or chain.project_id != project.id:
                 raise RuntimeError("Target-frame Job chain does not belong to its project")
@@ -434,6 +438,11 @@ async def _process_claimed_job(
                 ):
                     raise RuntimeError(
                         "Target-frame provider capability snapshot no longer matches"
+                    )
+                health = await image_provider.health()
+                if health.get("ok") is not True:
+                    raise RuntimeError(
+                        "Target-frame provider failed its execution-time health check"
                     )
                 report_progress(0.1, "generating target frame")
                 target_path = (
@@ -501,12 +510,17 @@ async def _process_claimed_job(
                 )
             report_progress(0.95, "target frame validated")
             output_asset_id = target_asset.id
+            target_chain = chain
+
+            def continue_target() -> object:
+                return continue_after_generated_target(db, project, target_chain, job, target_asset)
+
+            post_success = continue_target
+            post_success_chain = target_chain
         elif job.job_type == "video_chain_clip_generation":
             clip_id = job.payload.get(CHAIN_CLIP_ID_KEY)
             if not isinstance(clip_id, str):
                 raise RuntimeError("Video chain Job has no clip ID")
-            from flipthis_video_maker.domain.models import VideoChain, VideoChainClip
-
             clip = db.get(VideoChainClip, clip_id)
             if clip is None:
                 raise RuntimeError("Video chain clip is missing")
@@ -532,6 +546,12 @@ async def _process_claimed_job(
                 progress=report_progress,
             ).run(project, clip)
             output_asset_id = output.id
+
+            def finalize_automated_clip() -> object:
+                return auto_accept_publish_and_replenish(db, project, chain, clip)
+
+            post_success = finalize_automated_clip
+            post_success_chain = chain
         else:
             raise RuntimeError(f"Unsupported job type: {job.job_type}")
         completion = mark_succeeded(
@@ -551,6 +571,26 @@ async def _process_claimed_job(
             job_id=job.id,
             output_asset_ids=job.output_asset_ids,
         )
+        if post_success is not None:
+            try:
+                post_success()
+            except Exception as error:
+                db.rollback()
+                if post_success_chain is not None:
+                    post_success_chain.stream_state = {
+                        **(post_success_chain.stream_state or {}),
+                        "automation_status": "post_success_failed",
+                        "last_automation_error": {
+                            "type": type(error).__name__,
+                            "message": "Automation post-success action failed; inspect local logs",
+                        },
+                    }
+                    db.commit()
+                _append_job_log_safely(
+                    log_path,
+                    "post_success_automation_failed",
+                    error_type=type(error).__name__,
+                )
     except (PipelineCancelled, MediaCancelled):
         db.rollback()
         _mark_chain_clip_terminal(
@@ -671,7 +711,6 @@ def _mark_chain_clip_terminal(
     if not isinstance(clip_id, str):
         return
     from flipthis_video_maker.contracts.video_generation import ChainClipState
-    from flipthis_video_maker.domain.models import VideoChainClip
 
     clip = db.get(VideoChainClip, clip_id)
     if clip is None:

@@ -111,16 +111,22 @@ def publish_hls_buffer(db: Session, project: Project, chain: VideoChain) -> Asse
         },
     )
     total_duration = sum(duration for _path, duration in playlist_segments)
+    playback_position = min(chain.playback_position_seconds, total_duration)
+    remaining_duration = max(0.0, total_duration - playback_position)
     real_time_factor = max(real_time_factors) if real_time_factors else None
     chain.playlist_asset_id = playlist_asset.id
     chain.stream_state = {
+        **(chain.stream_state or {}),
         "published_segments": len(playlist_segments),
-        "buffer_depth_seconds": total_duration,
+        "published_duration_seconds": total_duration,
+        "playback_position_seconds": playback_position,
+        "buffer_depth_seconds": remaining_duration,
+        "remaining_buffer_seconds": remaining_duration,
         "buffer_target_seconds": chain.buffer_target_seconds,
-        "buffer_target_met": total_duration >= chain.buffer_target_seconds,
+        "buffer_target_met": remaining_duration >= chain.buffer_target_seconds,
         "sustainable_real_time_factor": real_time_factor,
         "generation_keeps_up_with_playback": real_time_factor is not None and real_time_factor <= 1,
-        "estimated_exhaustion_seconds": total_duration,
+        "estimated_exhaustion_seconds": remaining_duration,
         "exhaustion_policy": "pause_playback_and_rebuffer",
         "playlist_asset_id": playlist_asset.id,
     }

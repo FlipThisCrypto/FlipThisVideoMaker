@@ -12,7 +12,7 @@ expected result, observed result, and stderr; diagnose before changing code.
 
 - Setup: create a new temporary directory and point `FTVM_DATABASE_URL` at a nonexistent SQLite file.
 - Action: run `uv run alembic upgrade head`.
-- Expect: exit code `0` and the SQLite file exists at the current documented Alembic head (`0005` as
+- Expect: exit code `0` and the SQLite file exists at the current documented Alembic head (`0006` as
   of 2026-07-20).
 
 ### P2 — Backend static and unit validation (source: entry/core execution)

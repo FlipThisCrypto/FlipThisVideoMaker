@@ -1,14 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import {
   assembleVideoChain,
   changeVideoChainState,
+  configureChainAutomation,
   createVideoChain,
   createVideoChainClip,
   generateVideoChainTarget,
   publishVideoChainStream,
+  reportChainPlayback,
   retryVideoChainClip,
   reviewVideoChainClip,
 } from "../api/videoChains";
@@ -59,6 +61,8 @@ export function VideoChains() {
     useState<LipSyncEligibility>("explicit_skip");
   const [speakerLabel, setSpeakerLabel] = useState("");
   const [targetProviderId, setTargetProviderId] = useState("target-image-cli");
+  const [autoAcceptQaPassed, setAutoAcceptQaPassed] = useState(false);
+  const lastPlaybackReport = useRef(-1);
 
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -323,6 +327,27 @@ export function VideoChains() {
       changeVideoChainState(selectedChainId, operation),
     onSuccess: invalidate,
   });
+  const configureAutomation = useMutation({
+    mutationFn: () =>
+      configureChainAutomation(selectedChainId, {
+        enabled: true,
+        auto_accept_qa_passed: autoAcceptQaPassed,
+        target_provider_id: effectiveTargetProviderId,
+        target_provider_model: selectedTargetProvider!.model_identity,
+        target_prompt: prompt,
+        target_seed_base: 1000,
+        gpu_assignment: gpuAssignment,
+      }),
+    onSuccess: invalidate,
+  });
+  const reportPlayback = useMutation({
+    mutationFn: (positionSeconds: number) =>
+      reportChainPlayback(selectedChainId, positionSeconds),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["video-chains", projectId] });
+      void client.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
 
   if (!project.data) return <p>Loading project…</p>;
   return (
@@ -375,8 +400,8 @@ export function VideoChains() {
             >
               <option value="planned_target">Planned target frames</option>
               <option value="manual_target">Choose each target manually</option>
-              <option value="auto_generate_target" disabled>
-                Autonomous replenishment (controller pending)
+              <option value="auto_generate_target" disabled={targetProviders.length === 0}>
+                Autonomous validated replenishment
               </option>
             </select>
           </label>
@@ -454,6 +479,64 @@ export function VideoChains() {
                   {JSON.stringify(currentChain.stream_state, null, 2)}
                 </pre>
               </details>
+            )}
+            {currentChain.continuation_mode === "auto_generate_target" && (
+              <div className="mt-4 rounded border border-slate-700 p-4">
+                <h3 className="font-bold">Playback-aware replenishment</h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  The controller owns one target Job at a time and only extends from an
+                  accepted actual decoded boundary. It pauses when QA degrades, dialogue
+                  needs fresh audio, provider health fails, or generation cannot maintain
+                  the configured buffer.
+                </p>
+                <label className="mt-3 flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={autoAcceptQaPassed}
+                    onChange={(event) => setAutoAcceptQaPassed(event.target.checked)}
+                  />
+                  <span>
+                    Automatically accept only clips whose production boundary/continuity QA
+                    passed, publish them atomically, and queue the next target.
+                  </span>
+                </label>
+                <button
+                  className="button mt-3"
+                  disabled={
+                    !selectedTargetProvider?.available ||
+                    selectedTargetHealth?.ok !== true ||
+                    !prompt.trim() ||
+                    configureAutomation.isPending
+                  }
+                  onClick={() => configureAutomation.mutate()}
+                >
+                  Enable replenishment policy
+                </button>
+                {configureAutomation.isError && (
+                  <p className="mt-2 text-red-300" role="alert">
+                    {errorText(configureAutomation.error)}
+                  </p>
+                )}
+                {currentChain.playlist_asset_id && (
+                  <video
+                    className="mt-3 max-h-64 w-full rounded bg-black"
+                    controls
+                    src={`/api/v1/video-chains/${currentChain.id}/hls/playlist.m3u8`}
+                    onTimeUpdate={(event) => {
+                      const position = Math.floor(event.currentTarget.currentTime);
+                      if (
+                        position >= 0 &&
+                        position !== lastPlaybackReport.current &&
+                        position % 2 === 0 &&
+                        !reportPlayback.isPending
+                      ) {
+                        lastPlaybackReport.current = position;
+                        reportPlayback.mutate(position);
+                      }
+                    }}
+                  />
+                )}
+              </div>
             )}
           </section>
 

@@ -6,7 +6,8 @@
   publication, LTX/Luma protocol fixtures, and deterministic two-clip integration: **Exercised**.
 - Live LTX, live Luma, external Practical-RIFE, and external LatentSync: **Implemented, unexercised**.
 - Immutable next-target request/Job/Asset generation and deterministic/CLI fixtures: **Exercised**.
-- Real target-image model and autonomous buffer replenishment: **Implemented, unexercised / Planned**.
+- Playback-aware replenishment with deterministic target/video providers: **Exercised**.
+- Real target-image model and sustainable real-time replenishment: **Implemented, unexercised**.
 
 ## Production flow
 
@@ -31,6 +32,13 @@ To create the next ending image, choose a production image-editing provider in t
 panel. The Job receives only the actual boundary Asset ID and an immutable prompt/seed/profile
 snapshot. Its validated output appears as a new target Asset; this image stage is never labeled
 video motion.
+
+For an automatic chain, explicitly enable its immutable automation policy after selecting a healthy
+production image-editing provider. The controller owns one replenishment Job at a time, derives the
+next clip from the accepted tail's actual decoded frame, and may auto-accept only clips that pass the
+full delivery and continuity QA when that policy is enabled. Dialogue-dependent clips stop and ask
+for fresh audio rather than silently reusing speech. Failed or cancelled target Jobs require an
+operator retry; they do not cause unbounded paid requests.
 
 ## Provider configuration
 
@@ -107,5 +115,8 @@ The playlist is HLS EVENT, updated atomically after each validated segment. `str
 published segment count, validated buffer seconds, target seconds, end-to-end pipeline wall time,
 sustainable real-time factor, and whether observed generation keeps up with playback. If the buffer
 exhausts, the declared behavior is pause/rebuffer—not a false claim of an infinite stream. Target
-creation is now a restart-safe independent Job; automatic scheduling, QA acceptance policy, and
-playback-aware replenishment are not yet implemented.
+creation is a restart-safe independent Job. Playback reports persist the consumed position and
+trigger the event-driven controller when remaining validated media falls below the chain target.
+The controller is fixture-exercised, but no real target/video provider throughput has proven that it
+can keep pace with playback. Browser playback reporting also depends on native HLS support in the
+current UI.

@@ -80,7 +80,14 @@ the system does not call a finite playlist literally infinite.
 Future target images are a separate Job/Asset stage. An immutable target request references only a
 persisted continuity-source Asset; a production provider must advertise image editing and receive
 that prior decoded boundary as an argv argument. The resulting checksummed Asset is checkpointed for
-retry and is never mislabeled as video motion. Automatic playback-aware scheduling remains separate.
+retry and is never mislabeled as video motion. Playback-aware scheduling is handled by the durable
+controller described below.
+
+Automatic chains capture a durable policy and use one relational replenishment-Job slot. The
+controller calculates buffer ahead from published duration minus reported playback position, queues
+one target at a time, derives one successor from the accepted tail's immutable request, and optionally
+accepts only full-QA-passing clips before atomic HLS publication. Terminal target failure requires
+operator retry; pause/cancel and process restarts retain a reconcilable state.
 
 ## Current execution status
 

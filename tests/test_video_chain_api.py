@@ -40,10 +40,76 @@ class AvailableInterpolator:
         )
 
 
+class HealthyTargetProvider:
+    def info(self) -> ProviderInfo:
+        return ProviderInfo(
+            id="target-image-cli",
+            name="Target fixture",
+            model_identity="target-fixture-v1",
+            capabilities={Capability.IMAGE_GENERATION, Capability.IMAGE_EDITING},
+            available=True,
+        )
+
+    async def health(self) -> dict[str, object]:
+        return {"ok": True, "status": "healthy"}
+
+
 def _png(color: str) -> bytes:
     content = BytesIO()
     Image.new("RGB", (1280, 720), color).save(content, "PNG")
     return content.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_chain_api_configures_honest_automation_and_reports_playback(
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api_router,
+        "configured_image_provider",
+        lambda *_args, **_kwargs: HealthyTargetProvider(),
+    )
+    app = create_app()
+
+    def database_override() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = database_override
+    app.dependency_overrides[get_settings] = lambda: Settings(data_dir=tmp_path / "projects")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        project = (await client.post("/api/v1/projects", json={"name": "Automated"})).json()
+        chain = (
+            await client.post(
+                f"/api/v1/projects/{project['id']}/video-chains",
+                json={"name": "Buffer", "continuation_mode": "auto_generate_target"},
+            )
+        ).json()
+        configured = await client.put(
+            f"/api/v1/video-chains/{chain['id']}/automation",
+            json={
+                "target_provider_id": "target-image-cli",
+                "target_provider_model": "target-fixture-v1",
+                "target_prompt": "Create a coherent future action target.",
+                "auto_accept_qa_passed": True,
+                "gpu_assignment": "gpu1",
+            },
+        )
+        playback = await client.post(
+            f"/api/v1/video-chains/{chain['id']}/stream/playback",
+            json={"position_seconds": 0},
+        )
+
+    assert configured.status_code == 200, configured.text
+    configured_data = configured.json()
+    assert configured_data["automation_config"]["target_provider_model"] == "target-fixture-v1"
+    assert configured_data["stream_state"]["automation_status"] == (
+        "awaiting_initial_accepted_clip"
+    )
+    assert playback.status_code == 200
+    assert playback.json()["playback_position_seconds"] == 0
 
 
 @pytest.mark.asyncio

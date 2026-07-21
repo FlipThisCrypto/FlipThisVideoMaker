@@ -15,6 +15,8 @@ from flipthis_video_maker.api.render_profiles import (
 )
 from flipthis_video_maker.api.schemas import (
     AssetRead,
+    ChainAutomationConfigure,
+    ChainPlaybackUpdate,
     CharacterCreate,
     CharacterRead,
     JobRead,
@@ -81,6 +83,11 @@ from flipthis_video_maker.providers.registry import (
 )
 from flipthis_video_maker.scheduler.gpu import discover_gpus
 from flipthis_video_maker.services.asset_inputs import AssetInputError
+from flipthis_video_maker.services.chain_automation import (
+    configure_chain_automation,
+    schedule_chain_replenishment,
+    update_playback_position,
+)
 from flipthis_video_maker.services.jobs import request_cancellation, retry
 from flipthis_video_maker.services.planning import apply_story_plan
 from flipthis_video_maker.services.render_finalization import (
@@ -384,6 +391,58 @@ def list_video_chain_clips(chain_id: str, db: DB) -> list[VideoChainClip]:
     )
 
 
+@router.put("/video-chains/{chain_id}/automation", response_model=VideoChainRead)
+async def configure_video_chain_automation(
+    chain_id: str,
+    body: ChainAutomationConfigure,
+    db: DB,
+    settings: Config,
+) -> VideoChain:
+    chain = require(db, VideoChain, chain_id)
+    project = require(db, Project, chain.project_id)
+    try:
+        provider = configured_image_provider(settings.provider_config, body.target_provider_id)
+        info = provider.info()
+        if not {
+            Capability.IMAGE_GENERATION,
+            Capability.IMAGE_EDITING,
+        }.issubset(info.capabilities):
+            raise VideoChainConflict(
+                "Automatic replenishment requires continuity-aware image generation"
+            )
+        if info.model_identity != body.target_provider_model:
+            raise VideoChainConflict("Automatic target model does not match provider discovery")
+        if body.target_provider_settings:
+            raise VideoChainConflict(
+                "The configured target-image CLI does not expose namespaced runtime settings"
+            )
+        health = await provider.health()
+        if health.get("ok") is not True:
+            raise VideoChainConflict("Automatic target provider health check failed")
+        configure_chain_automation(db, chain, body.to_contract())
+        schedule_chain_replenishment(db, project, chain)
+        db.refresh(chain)
+        return chain
+    except (KeyError, ValueError) as error:
+        raise HTTPException(409, str(error)) from error
+
+
+@router.post("/video-chains/{chain_id}/stream/playback", response_model=VideoChainRead)
+def report_chain_playback(
+    chain_id: str,
+    body: ChainPlaybackUpdate,
+    db: DB,
+) -> VideoChain:
+    chain = require(db, VideoChain, chain_id)
+    project = require(db, Project, chain.project_id)
+    try:
+        update_playback_position(db, project, chain, body.position_seconds)
+        db.refresh(chain)
+        return chain
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
 @router.post(
     "/video-chains/{chain_id}/targets",
     response_model=JobRead,
@@ -638,7 +697,13 @@ async def enqueue_video_chain_clip(
 @router.post("/video-chain-clips/{clip_id}/accept", response_model=VideoChainClipRead)
 def accept_video_chain_clip(clip_id: str, db: DB) -> VideoChainClip:
     try:
-        return accept_chain_clip(db, require(db, VideoChainClip, clip_id))
+        clip = accept_chain_clip(db, require(db, VideoChainClip, clip_id))
+        chain = require(db, VideoChain, clip.chain_id)
+        if chain.automation_config.get("enabled") is True:
+            project = require(db, Project, chain.project_id)
+            publish_hls_buffer(db, project, chain)
+            schedule_chain_replenishment(db, project, chain)
+        return clip
     except VideoChainConflict as error:
         raise HTTPException(409, str(error)) from error
 
@@ -720,6 +785,28 @@ def pause_chain(chain_id: str, db: DB) -> VideoChain:
     if chain.state != ChainState.ACTIVE.value:
         raise HTTPException(409, "Only an active chain can be paused")
     chain.state = ChainState.PAUSED.value
+    if chain.replenishment_job_id is not None:
+        replenishment = db.get(Job, chain.replenishment_job_id)
+        if replenishment is not None and replenishment.state in {
+            JobState.QUEUED.value,
+            JobState.RUNNING.value,
+        }:
+            state = request_cancellation(db, replenishment)
+            if state is JobState.CANCELLED:
+                chain.replenishment_job_id = None
+    clips = db.scalars(select(VideoChainClip).where(VideoChainClip.chain_id == chain.id))
+    for clip in clips:
+        if clip.job_id is None:
+            continue
+        clip_job = db.get(Job, clip.job_id)
+        if clip_job is None or clip_job.state not in {
+            JobState.QUEUED.value,
+            JobState.RUNNING.value,
+        }:
+            continue
+        state = request_cancellation(db, clip_job)
+        if state is JobState.CANCELLED:
+            clip.state = ChainClipState.CANCELLED.value
     db.commit()
     return chain
 
@@ -731,6 +818,9 @@ def resume_chain(chain_id: str, db: DB) -> VideoChain:
         raise HTTPException(409, "Only a paused chain can be resumed")
     chain.state = ChainState.ACTIVE.value
     db.commit()
+    project = require(db, Project, chain.project_id)
+    schedule_chain_replenishment(db, project, chain)
+    db.refresh(chain)
     return chain
 
 
@@ -740,6 +830,13 @@ def cancel_chain(chain_id: str, db: DB) -> VideoChain:
     if chain.state in {ChainState.COMPLETE.value, ChainState.CANCELLED.value}:
         raise HTTPException(409, "Video chain is already terminal")
     clips = list(db.scalars(select(VideoChainClip).where(VideoChainClip.chain_id == chain.id)))
+    if chain.replenishment_job_id is not None:
+        replenishment = db.get(Job, chain.replenishment_job_id)
+        if replenishment is not None and replenishment.state in {
+            JobState.QUEUED.value,
+            JobState.RUNNING.value,
+        }:
+            request_cancellation(db, replenishment)
     for clip in clips:
         if clip.job_id is None:
             continue

@@ -21,6 +21,7 @@ from flipthis_video_maker.config.render_profiles import (
     RenderProfileExecution,
 )
 from flipthis_video_maker.contracts.video_generation import (
+    ChainAutomationConfiguration,
     ContinuationMode,
     FirstLastFrameGenerationRequest,
     InterpolationMode,
@@ -97,6 +98,10 @@ class VideoChainRead(ORMModel):
     playlist_asset_id: str | None
     assembled_asset_id: str | None
     stream_state: dict[str, Any]
+    automation_config: dict[str, Any]
+    replenishment_job_id: str | None
+    playback_position_seconds: float
+    playback_updated_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -146,6 +151,29 @@ class TargetFrameGenerationCreate(BaseModel):
     seed: int = Field(default=42, ge=0, le=4_294_967_295)
     provider_settings: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     gpu_assignment: Literal["gpu0", "gpu1"] = "gpu0"
+
+
+class ChainAutomationConfigure(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    enabled: bool = True
+    auto_accept_qa_passed: bool = True
+    target_provider_id: str = Field(default="target-image-cli", min_length=1, max_length=120)
+    target_provider_model: str = Field(min_length=1, max_length=160)
+    target_prompt: str = Field(min_length=1, max_length=6000)
+    target_negative_prompt: str = Field(default="", max_length=6000)
+    target_seed_base: int = Field(default=1000, ge=0, le=4_294_967_295)
+    target_provider_settings: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
+    gpu_assignment: Literal["gpu0", "gpu1"] = "gpu0"
+
+    def to_contract(self) -> ChainAutomationConfiguration:
+        return ChainAutomationConfiguration.model_validate(self.model_dump())
+
+
+class ChainPlaybackUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    position_seconds: float = Field(ge=0, le=86_400)
 
 
 class VideoChainClipRead(ORMModel):

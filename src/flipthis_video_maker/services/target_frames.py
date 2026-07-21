@@ -1,5 +1,6 @@
 import uuid
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from flipthis_video_maker.contracts.video_generation import TargetFrameGenerationRequest
@@ -23,6 +24,7 @@ def enqueue_target_frame_generation(
     request: TargetFrameGenerationRequest,
     *,
     gpu_assignment: str,
+    claim_replenishment_slot: bool = False,
 ) -> Job:
     if chain.project_id != project.id or request.chain_id != chain.id:
         raise VideoChainConflict("Target-frame request belongs to another chain or project")
@@ -56,7 +58,22 @@ def enqueue_target_frame_generation(
         },
     )
     db.add(job)
+    if claim_replenishment_slot:
+        claimed = db.execute(
+            update(VideoChain)
+            .where(
+                VideoChain.id == chain.id,
+                VideoChain.replenishment_job_id.is_(None),
+            )
+            .values(replenishment_job_id=job.id)
+            .returning(VideoChain.id)
+            .execution_options(synchronize_session=False)
+        ).scalar_one_or_none()
+        if claimed is None:
+            db.rollback()
+            raise VideoChainConflict("A replenishment Job already owns this chain")
     db.commit()
+    db.refresh(chain)
     return job
 
 

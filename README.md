@@ -24,6 +24,11 @@ A separate immutable target-frame Job can create a future ending-image Asset fro
 boundary through an administrator-configured image-editing CLI. Its deterministic and safe-argv
 fixtures are exercised; no real target-image model is configured in this workspace.
 
+Automatic chains can capture a versioned target policy and use a playback-aware controller to keep
+one target/successor operation ahead of the consumed HLS prefix. Concurrency, restart reconciliation,
+failure stop, and QA-gated publication are exercised with deterministic providers. Real generation
+throughput and sustainable continuous playback remain unproven.
+
 ## Quick start
 
 Prerequisites: Python 3.12, `uv`, Node.js/Corepack, FFmpeg, and ffprobe.

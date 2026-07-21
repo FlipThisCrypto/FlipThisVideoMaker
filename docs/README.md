@@ -55,6 +55,7 @@ Start with the documents in this order when resuming implementation:
 - [0010 — First/last-frame generative video stack](adr/0010-first-last-generative-video-stack.md)
 - [0011 — Durable Job ownership leases](adr/0011-durable-job-ownership-leases.md)
 - [0012 — Generate chain targets as separate Assets](adr/0012-generate-chain-targets-as-separate-assets.md)
+- [0013 — Playback-aware chain replenishment](adr/0013-playback-aware-chain-replenishment.md)
 
 `docs/current-status.md` is the authoritative handoff record. Update it and this map whenever a phase
 adds, removes, or renames a durable capability or document.

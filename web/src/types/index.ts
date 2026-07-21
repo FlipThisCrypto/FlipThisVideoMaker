@@ -335,6 +335,10 @@ export interface VideoChain {
   playlist_asset_id: string | null;
   assembled_asset_id: string | null;
   stream_state: Record<string, unknown>;
+  automation_config: Record<string, unknown>;
+  replenishment_job_id: string | null;
+  playback_position_seconds: number;
+  playback_updated_at: string | null;
   created_at: string;
   updated_at: string;
 }

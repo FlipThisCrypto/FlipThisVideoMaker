@@ -3,7 +3,7 @@
 **Review date:** 2026-07-20
 
 **Target:** the `codex/flf-generative-video` vertical slice, including the versioned request/result
-contract, migrations 0004–0005, provider adapters, worker pipeline, media QA, chain persistence, assembly,
+contract, migrations 0004–0006, provider adapters, worker pipeline, media QA, chain persistence, assembly,
 HLS publication, React workflow, tests, and documentation.
 
 **Verdict:** **APPROVE WITH FIXES** as a recoverable implementation checkpoint. Do not approve a
@@ -15,7 +15,7 @@ passes. Protocol fixtures prove contract behavior, not visual generation quality
 - `MEMORY.md` for the product goal and non-negotiable evidence rules.
 - `docs/current-status.md` for exercised versus unexercised state.
 - ADR 0010 and `docs/provider-decision.md` for the selected provider stack.
-- Migrations 0004–0005, the immutable request/result models, provider protocol fixtures, integration
+- Migrations 0004–0006, the immutable request/result models, provider protocol fixtures, integration
   tests, FFprobe frame/timestamp evidence, and Playwright workflow for implementation evidence.
 - Current primary provider documentation linked from `docs/provider-decision.md` for external
   capability facts.
@@ -40,8 +40,10 @@ passes. Protocol fixtures prove contract behavior, not visual generation quality
 | Audio disappears during lip sync, assembly, or HLS | Lip-sync integration asserts final audio and SyncNet evidence; assembly and HLS tests assert audio stream preservation. |
 | Unsupported provider controls reach a Job | Capability gating rejects unsupported negative prompt, seed, motion strength, identity references, lip-sync, and interpolation choices before enqueue. The UI exposes only supported controls. |
 | Two 12 GB GPUs are treated as pooled memory | Worker configuration, device locks, and documentation treat them as independent devices. No model-parallel claim is made. Real CUDA concurrency remains unexercised. |
-| Finite output is called infinite streaming | The implementation exposes a finite HLS EVENT buffer, pipeline-wall real-time factor, and pause/rebuffer exhaustion policy. Automatic replenishment remains Planned. |
+| Finite output is called infinite streaming | The implementation exposes a finite HLS EVENT buffer, pipeline-wall real-time factor, playback-aware one-at-a-time replenishment, and pause/rebuffer exhaustion policy. Sustainable real-time generation remains unproven. |
 | Automatic target generation is an unconditioned or untracked still | Production target providers must advertise image editing, receive the actual continuity Asset as a reference, publish a checksummed child Asset, and checkpoint its immutable request/output. The mock is excluded from production controls. |
+| Two controllers or a restart create duplicate paid work | One relational replenishment-Job slot is claimed conditionally. Concurrent-session and succeeded-Job restart fixtures prove one target and one successor; terminal failure stops for operator retry. |
+| Automation publishes a degraded clip | Auto-accept is explicit and calls the same continuity-QA acceptance gate before atomic HLS publication. Non-reviewable, degraded, dialogue-dependent, paused, failed, and cancelled states stop the controller. |
 | Credentials or private media enter Git | Final exposure sweep found no credential value, personal path, generated media, database, key file, or sensitive history object. `test-key` and `replace-in-your-shell-or-secret-manager` are deliberate fixtures/placeholders. |
 
 ## Material findings resolved during review

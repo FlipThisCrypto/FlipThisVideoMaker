@@ -48,6 +48,16 @@ export interface GenerateTargetFrameRequest {
   gpu_assignment: "gpu0" | "gpu1";
 }
 
+export interface ConfigureChainAutomationRequest {
+  enabled: boolean;
+  auto_accept_qa_passed: boolean;
+  target_provider_id: string;
+  target_provider_model: string;
+  target_prompt: string;
+  target_seed_base: number;
+  gpu_assignment: "gpu0" | "gpu1";
+}
+
 export function createVideoChain(
   projectId: string,
   request: CreateVideoChainRequest,
@@ -75,6 +85,23 @@ export function generateVideoChainTarget(
   return api<Job>(`/video-chains/${chainId}/targets`, {
     method: "POST",
     body: JSON.stringify(request),
+  });
+}
+
+export function configureChainAutomation(
+  chainId: string,
+  request: ConfigureChainAutomationRequest,
+) {
+  return api<VideoChain>(`/video-chains/${chainId}/automation`, {
+    method: "PUT",
+    body: JSON.stringify(request),
+  });
+}
+
+export function reportChainPlayback(chainId: string, positionSeconds: number) {
+  return api<VideoChain>(`/video-chains/${chainId}/stream/playback`, {
+    method: "POST",
+    body: JSON.stringify({ position_seconds: positionSeconds }),
   });
 }
 

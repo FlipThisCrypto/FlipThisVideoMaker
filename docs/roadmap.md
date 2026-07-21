@@ -13,6 +13,8 @@
   explicit unsafe-retry acknowledgement.
 - Immutable continuity-aware target-image Jobs, decoded Asset validation, safe CLI cancellation, and
   restart checkpoint reuse.
+- Playback-aware automatic target/successor scheduling with a single relational ownership slot,
+  durable position, QA-gated acceptance, atomic publication, and restart/failure reconciliation.
 
 These are fixture/integration-proven. Real model quality remains blocked.
 
@@ -32,8 +34,7 @@ failures until the acceptance threshold passes.
 3. Add isolated LPIPS and opt-in privacy-reviewed identity QA.
 4. Use provider-native retake/extend or a true generative bridge when real outputs miss the target end;
    never use a visible morph or final-frame overwrite to pass.
-5. Connect the exercised target-generation stage to a playback-aware asynchronous replenishment
-   controller after real generation throughput establishes a safe buffer size and sustainable
-   real-time factor.
+5. Exercise and tune the replenishment controller against measured real generation throughput; add
+   a cross-browser HLS player if native browser playback is insufficient.
 6. Add authentication before any non-local exposure, then PostgreSQL row locking and distributed
    admission before multi-host operation. Single-host Job ownership leases are now exercised.

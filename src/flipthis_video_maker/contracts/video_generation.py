@@ -126,6 +126,23 @@ class TargetFrameGenerationRequest(BaseModel):
         return hashlib.sha256(payload.encode()).hexdigest()
 
 
+class ChainAutomationConfiguration(BaseModel):
+    """Captured policy for playback-aware target/clip replenishment."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
+
+    version: Literal[1] = 1
+    enabled: bool = True
+    auto_accept_qa_passed: bool = True
+    target_provider_id: str = Field(min_length=1, max_length=120)
+    target_provider_model: str = Field(min_length=1, max_length=160)
+    target_prompt: str = Field(min_length=1, max_length=6000)
+    target_negative_prompt: str = Field(default="", max_length=6000)
+    target_seed_base: int = Field(default=1000, ge=0, le=4_294_967_295)
+    target_provider_settings: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
+    gpu_assignment: Literal["gpu0", "gpu1"] = "gpu0"
+
+
 class LipSyncSettings(BaseModel):
     """Provider-neutral speaking-shot intent captured before lip-sync execution."""
 
@@ -289,6 +306,7 @@ def utc_now() -> datetime:
 
 __all__ = [
     "CapturedFallbackPolicy",
+    "ChainAutomationConfiguration",
     "ChainClipState",
     "ChainState",
     "ContinuationMode",
