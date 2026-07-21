@@ -73,7 +73,7 @@ weights are **Exercised** on GPU 1. The 8× run converted 81 frames to 641 uniqu
 
 | Candidate | Verified evidence | 12 GB fit | Terms | Decision |
 |---|---|---:|---|---|
-| LatentSync 1.5 | Official CLI, 8 GB inference minimum, official SyncNet confidence/offset evaluator | Yes on paper | Apache-2.0 code; weights/dependencies still require review | **Implemented local post-stage, unexercised** |
+| LatentSync 1.5 | Official CLI, 8 GB inference minimum, official SyncNet confidence/offset evaluator | **Yes; 7,629 MiB measured peak on GPU 1** | Apache-2.0 code; official weights are OpenRAIL++ | **Selected local post-stage; Exercised on one eligible sample** |
 | LatentSync 1.6 | Higher-resolution release | No; official minimum 18 GB | Apache-2.0 code | Not for these GPUs |
 | MuseTalk 1.5 | Official normal/realtime CLI; recommended 25-fps input; 30+ fps reported on V100 | Unknown on 4070 12 GB | Repository/model terms require review | Evaluated fallback, not integrated |
 | Wav2Lip open release | Widely used inference path | Likely | Open release is restricted to research/non-commercial use | Rejected for production |
@@ -96,5 +96,6 @@ selection, so the UI says so and does not pretend otherwise.
   inferred from this representative chain.
 - Wan2.2 measured 1,034.13 seconds for one 10-second native clip; the full RIFE/QA path measured
   1,083.64 seconds. It is not sustainable real-time generation.
-- Practical-RIFE concurrency is exercised on GPU 0 and GPU 1. LatentSync remains unexercised.
+- Practical-RIFE concurrency is exercised on GPU 0 and GPU 1. LatentSync is exercised independently
+  on GPU 1; concurrent Wan/LatentSync scheduling remains unmeasured.
 - Two 12 GB cards are treated as separate devices; no model splitting or pooled 24 GB claim is made.

@@ -62,10 +62,18 @@ quality or sustainable streaming.
 | Medium | Provider-specific controls could fail only inside the worker. | Unsupported requests could consume queue capacity. | Reject unsupported controls during enqueue from reported capabilities. |
 | Medium | Default H.264 assembly quality collapsed two subtly different tail frames. | A valid real chain could acquire a short frozen tail during final assembly. | Encode assembly explicitly with `medium`/CRF 12, retain freeze evidence in integration coverage, and rerun the real assembly. The replacement contains 1,199 unique frames. |
 
+The real lip-sync exercise found that raw RIFE output requested at 25 fps was actually 321 frames /
+12.84 seconds, not the required 250 frames / 10 seconds, and that the isolated official evaluator
+could not resolve its relative `checkpoints/` path. The pipeline now persists the raw stage,
+normalizes a separate immutable exact-250-frame input, and exposes only the trusted pinned checkpoint
+directory inside the unique evaluator workspace. Provider health also verifies revision, hashes,
+and a real CUDA/import probe instead of treating configured paths as readiness.
+
 No unresolved P0 or P1 code defect was found in the exercised scope. Live generation, CUDA
 interpolation, exact delivery, visual inspection, persisted actual-frame continuation, and a real
-two-clip assembly now exist for one representative chain. Broad-content quality, real lip sync, and
-sustainable playback-ahead generation remain evidence blockers, not grounds to generalize the pass.
+two-clip assembly now exist for one representative chain. One eligible real lip-sync run also passes;
+broad-content generation/lip-sync quality and sustainable playback-ahead generation remain evidence
+blockers, not grounds to generalize the pass.
 
 ## Reproduction record
 

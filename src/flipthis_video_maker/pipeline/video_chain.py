@@ -174,6 +174,8 @@ class VideoChainPipeline:
 
         motion_source_asset = native_asset
         lip_sync_run: LipSyncRunOutput | None = None
+        lip_source_asset: Asset | None = None
+        lip_source_interpolated_asset: Asset | None = None
         audio_asset: Asset | None = None
         audio_path: Path | None = None
         if request.lip_sync_mode is not LipSyncMode.SKIP:
@@ -203,13 +205,52 @@ class VideoChainPipeline:
                 "lip_sync_source_asset_id",
                 "video/mp4",
             )
+            lip_source_interpolated_asset = self._snapshot_asset(
+                project,
+                clip,
+                "lip_sync_interpolated_asset_id",
+                "video/mp4",
+            )
             interpolator = self._interpolator(request)
             if lip_source_asset is None:
+                if lip_source_interpolated_asset is None:
+                    lip_source_interpolated_path = (
+                        root / f"lip-sync-rife-25fps-{uuid.uuid4().hex}.mp4"
+                    )
+                    await interpolator.process(
+                        Path(native_asset.file_path),
+                        lip_source_interpolated_path,
+                        target_fps=25,
+                    )
+                    lip_source_interpolated_asset = register_asset(
+                        self.db,
+                        project_id=project.id,
+                        shot_id=None,
+                        kind="lip_sync_source_interpolated_raw_video",
+                        path=lip_source_interpolated_path,
+                        provider=request.interpolation_provider_id or "rife-local",
+                        model="Practical-RIFE-4.25",
+                        parents=[native_asset.id],
+                        generation_parameters={
+                            "generation_category": "frame_interpolation",
+                            "purpose": "LatentSync 1.5 pre-normalization",
+                            "source_native_fps": native_asset.frame_rate,
+                            "requested_target_fps": 25,
+                        },
+                        cancel_requested=self.cancel_requested,
+                    )
+                    clip.result_snapshot = {
+                        **clip.result_snapshot,
+                        "lip_sync_interpolated_asset_id": lip_source_interpolated_asset.id,
+                    }
+                    self.db.commit()
                 lip_source_path = root / f"lip-sync-source-25fps-{uuid.uuid4().hex}.mp4"
-                await interpolator.process(
-                    Path(native_asset.file_path),
+                normalize_interpolated_delivery(
+                    Path(lip_source_interpolated_asset.file_path),
                     lip_source_path,
-                    target_fps=25,
+                    duration_seconds=request.duration_seconds,
+                    delivery_fps=25,
+                    cancel_requested=self.cancel_requested,
                 )
                 lip_source_asset = register_asset(
                     self.db,
@@ -219,12 +260,13 @@ class VideoChainPipeline:
                     path=lip_source_path,
                     provider=request.interpolation_provider_id or "rife-local",
                     model="Practical-RIFE-4.25",
-                    parents=[native_asset.id],
+                    parents=[native_asset.id, lip_source_interpolated_asset.id],
                     generation_parameters={
-                        "generation_category": "frame_interpolation",
+                        "generation_category": "frame_rate_conversion_and_encoding",
                         "purpose": "LatentSync 1.5 documented 25-fps input",
                         "source_native_fps": native_asset.frame_rate,
                         "target_fps": 25,
+                        "expected_frame_count": int(request.duration_seconds * 25),
                     },
                     cancel_requested=self.cancel_requested,
                 )
@@ -568,6 +610,14 @@ class VideoChainPipeline:
                 ),
                 "av_offset_frames": (
                     lip_sync_run.av_offset_frames if lip_sync_run is not None else None
+                ),
+                "lip_sync_source_asset_id": (
+                    lip_source_asset.id if lip_source_asset is not None else None
+                ),
+                "lip_sync_interpolated_asset_id": (
+                    lip_source_interpolated_asset.id
+                    if lip_source_interpolated_asset is not None
+                    else None
                 ),
             },
             timing=ProviderTiming(

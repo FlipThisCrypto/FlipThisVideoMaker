@@ -4,7 +4,8 @@
 
 - Chain contract, migration, API/UI, lineage, exact delivery QA, shared-boundary assembly, HLS
   publication, local Wan protocol fixtures, and deterministic two-clip integration: **Exercised**.
-- Local Wan and Practical-RIFE runtimes: **Exercised**. LatentSync: **Implemented, unexercised**.
+- Local Wan, Practical-RIFE, and LatentSync 1.5 runtimes: **Exercised**. LatentSync evidence covers
+  one eligible single-face sample and one correctly rejected mismatched sample.
 - Local LPIPS boundary QA runtime and persisted report integration: **Exercised**.
 - Per-physical-GPU pipeline telemetry and stage provenance: **Exercised** on GPU 1 with RIFE.
 - Pinned open live-action two-clip Wan→RIFE→QA chain and 1,199-frame assembly: **Exercised and
@@ -67,10 +68,18 @@ Install Practical-RIFE with the pinned installer, copy its printed paths into `c
 and enable `rife-local`. The worker's `CUDA_VISIBLE_DEVICES` is inherited; the adapter does not
 invent a device flag.
 
-For optional lip sync, install the official LatentSync repository outside the core environment,
-install the 1.5 checkpoint/config plus the official SyncNet checkpoint, update the five configured
-paths, and enable `latentsync-local`. Version 1.6 is not selected because the official minimum is
-18 GB; version 1.5 documents 8 GB.
+For optional lip sync, install the pinned official LatentSync 1.5 runtime outside the core
+environment. The installer verifies the code revision and official model hashes, bootstraps the
+face-detector models, and proves that its isolated Python environment sees one CUDA device:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 scripts/install-latentsync15.sh \
+  /absolute/external/latentsync-runtime
+```
+
+Update the configured LatentSync paths and enable `latentsync-local`. Code is Apache-2.0; the
+official weights are OpenRAIL++, not Apache, and their restrictions require an intended-use review.
+Version 1.6 is not selected because its official minimum is 18 GB; version 1.5 documents 8 GB.
 
 ## Real acceptance run
 
@@ -130,6 +139,25 @@ uv run python scripts/run-open-chain-acceptance.py finalize /absolute/new-chain-
 except the checksum-bound accepted Clip 1 delivery. `finalize` refuses an unreviewed or changed Clip
 2, accepts it, runs production assembly, and verifies the persisted actual-frame lineage, exact
 1,199-frame contract, freeze evidence, and decoded join mapping.
+
+To reproduce the exercised local lip-sync post-stage, provide the accepted chain directory, a
+rights-cleared speaking audio file, all three isolated runtimes, and a new output directory:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 uv run python scripts/run-open-lipsync-acceptance.py \
+  /absolute/accepted-chain /absolute/dialogue.wav /absolute/new-lipsync-output \
+  --latentsync-runtime /absolute/latentsync-runtime \
+  --rife-runtime /absolute/practical-rife --lpips-runtime /absolute/lpips \
+  --physical-gpu 1
+```
+
+The harness refuses overwrite, changed source evidence, an unpinned runtime, changed weights, or
+ambiguous CUDA visibility. It creates a fresh Alembic database, immutable stage Assets, exact
+250-frame input, official SyncNet result, exact 600-frame audio delivery, QA report, contact sheets,
+and GPU telemetry. Inspect the full/native/face contact sheets, then bind a visual decision with the
+existing review recorder before treating the result as accepted. The exercised audio was an
+upstream demonstration fixture retained only in temporary local evidence; operators must use and
+document rights-cleared audio for their intended publication.
 
 ## Recovery
 

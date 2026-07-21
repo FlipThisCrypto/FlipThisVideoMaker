@@ -11,7 +11,8 @@ and exercised with deterministic CPU protocol/integration fixtures. A local Wan2
 adapter is implemented and its isolated ComfyUI runtime, health probe, native generation, history
 collection, and media inspection are exercised on GPU 1. The first visual artifact was rejected.
 Practical-RIFE 4.25 is exercised with official weights concurrently on both independent GPUs, and
-local LPIPS 0.1/AlexNet boundary QA is exercised on CPU. LatentSync 1.5 remains unexercised.
+local LPIPS 0.1/AlexNet boundary QA is exercised on CPU. LatentSync 1.5 is exercised on GPU 1 for
+one suitable single-face dialogue sample; one mismatched sample failed its SyncNet gate honestly.
 A pinned CC BY live-action acceptance run and its real successor passed technical and agent visual
 review, including persisted actual-frame lineage and a seamless 1,199-frame production assembly.
 Broader-content production quality remains unproven.
@@ -125,11 +126,23 @@ Only one clearly visible speaking face is eligible. Narration/no speaker, hidden
 faces, no speech, and explicit skip are captured as non-lip-sync decisions. LatentSync has no
 deterministic multi-face selector, and the UI says so.
 
-Lip-sync input is interpolated to its documented 25-fps expectation, output is immutable, and the
+Lip-sync input is interpolated and then normalized to exactly 250 CFR frames/10.000 seconds at its
+documented 25-fps expectation, output is immutable, and the
 official SyncNet evaluator must report confidence ≥3 and AV offset within ±1 frame. The final output
 must contain audio and still pass all start/end delivery QA. Cancellation, timeout, configured OOM,
-partial cleanup, unique evaluator workspace, and safe argv fixtures pass. Real weights/GPU execution
-is unexercised.
+partial cleanup, unique evaluator workspace, and safe argv fixtures pass. Runtime health verifies
+the pinned code revision, checksums all required weights, and executes a CUDA/import probe rather
+than trusting configured paths.
+
+A real local post-processing run on the accepted second chain clip passed at SyncNet confidence
+`6.81` and zero-frame A/V offset. Its H.264/AAC delivery is exactly 10.000 seconds, CFR 60 fps, and
+600 decoded unique frames. Endpoint QA passed at start MAE `0.018292` / SSIM `0.997354` / LPIPS
+`0.055615` and end MAE `0.017854` / SSIM `0.996182` / LPIPS `0.080310`; final-step MAE was
+`0.000516`. Visual review found coherent identity/scene and plausible varied speaking poses without
+a crossfade, morph, duplicate, freeze, or endpoint snap. A deliberately unsuitable source-audio
+pair scored confidence `0.16` / offset 3 and was rejected, proving the gate does not equate an
+adapter-returned video with accepted lip sync. This is one eligible-content result, not general
+quality evidence or deterministic multi-face support.
 
 ## Streaming and assembly
 
@@ -191,7 +204,8 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 - RIFE/LatentSync inherit the one worker-visible GPU and never invent an upstream device flag.
 - Wan2.2 FLF was exercised on GPU 1. RIFE was exercised concurrently on GPU 0 and GPU 1 with
   isolated CUDA visibility, workspaces, outputs, and per-card telemetry. This proves independent
-  jobs, not pooled memory or model parallelism. LatentSync remains unmeasured.
+  jobs, not pooled memory or model parallelism. LatentSync 1.5 was exercised independently on GPU 1;
+  it is not claimed to run concurrently with Wan or to split across cards.
 - GPU video Jobs sample the claimed physical device through their pipeline and persist overall plus
   per-stage VRAM/utilization/temperature evidence with observed cadence and coverage.
 
@@ -201,11 +215,12 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
 | Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0006`, downgrade to `0005`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, revision `0006` |
-| Ruff / formatting / strict MyPy | Passed; 120 files formatted, 69 source files type-checked |
+| Ruff / formatting / strict MyPy | Passed; 122 files formatted, 69 source files type-checked |
 | Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
 | Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
+| Focused lip-sync/provider/pipeline/review tests | Passed; 17 tests covering pinned runtime health, evaluator isolation, exact-250-frame preprocessing, persisted raw lineage, harness path safety, atomic evidence, face-sheet review binding, and failure handling |
 | Focused real-chain harness/assembly tests | Passed; 9 tests covering prior-review validation, overwrite refusal, actual-Asset lineage, atomic evidence writes, mandatory successor review, real assembly freeze evidence, and encoding provenance |
-| Complete pytest | Passed; 207 tests in 116.33 seconds |
+| Complete pytest | Passed; 216 tests in 120.49 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
 | Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
 | Playwright | Passed; one complete isolated browser/API/worker workflow in 22.8 seconds |
@@ -229,6 +244,9 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Real two-clip assembly | **Passed:** H.264 High/yuv420p, 848×480, CFR 60, 19.983333 s, exactly 1,199 decoded unique frames, zero adjacent duplicates, longest frozen run 1. Clip 2 frame 0 was trimmed without crossfade; assembled frame 599→600 join MAE 0.01497 / SSIM 0.99805. Assembly SHA-256 `94bf79d3718a372a51064291603f09aa35adee60e062a62ec95a32f0a14b4754`. |
 | Real chain artifact record | Temporary local root `/tmp/flipthis-tos-chain-acceptance`; persisted SQLite project/chain/Jobs/Assets, native/delivery/contact sheets, visual review, and assembly remain outside Git. Final report SHA-256 `411f823094800911a2d2aa81558fbccd152e73572b14d2e56dd140641e943921`; Clip 2 delivery SHA-256 `35f79ae4861277244516ab5482f32b4b5bce8a541c66479d0c658afb2fb1a02f`. |
 | Real successor GPU telemetry | GPU 1, 1,078.39 s, 7,917 samples, baseline 177 MiB, peak 5,611 MiB, stage delta 5,434 MiB, peak utilization 100%, peak temperature 83 C, observed coverage 73.4%. Runtime shut down cleanly after review. |
+| Local LatentSync 1.5 acceptance | **Passed one eligible sample:** pinned code/weight health, exact 250-frame CFR-25 input, official SyncNet confidence 6.81 / offset 0, immutable post-stage, H.264 + AAC, exactly 600 unique CFR-60 delivery frames, boundary/LPIPS/no-snap QA, and checksum-bound visual review. A mismatched audio attempt failed honestly at confidence 0.16 / offset 3. |
+| LatentSync GPU telemetry | GPU 1, 167.99 s end-to-end, 1,210 samples, 72.0% observed coverage, baseline 18 MiB, peak 7,629 MiB, stage delta 7,611 MiB, peak utilization 100%, peak temperature 74 C. The lip-sync stage held the peak; RIFE peaked at 715 MiB. |
+| LatentSync artifact record | Temporary local root `/tmp/flipthis-latentsync-acceptance-run`; delivery SHA-256 `2dec320dbf257f7f9805c40f2e2f8b73d50f7e977139b1a19e14bdf271833aba`, QA report `3441b826793bc24b4ef923e72e586b0e21010362a3ac53077ea12f38d374ed74`, and checksum-bound visual review `de61eb08b473ebbc3c6842c8b12bc52531f4df0e330927bc0cba868f8f53f421`. Media, audio, weights, and database remain outside Git. |
 | Original synthetic visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; retained as evidence that endpoint metrics alone do not prove quality. |
 
 ## Known limitations and blockers
@@ -236,9 +254,10 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 1. One representative two-clip live-action chain passes visual, technical, lineage, and assembly
    acceptance. This does not establish broad-content quality; the earlier synthetic changed-identity
    artifact remains rejected and demonstrates that quality is content-dependent.
-2. LatentSync is not installed at its configured path. Concurrent independent RIFE execution is
-   exercised on both cards, but concurrent Wan2.2 generation and mixed-model scheduling remain
-   unmeasured. Sampling can miss allocations shorter than the observed probe cadence.
+2. LatentSync has passed one eligible single-face/audio pairing, but broad speakers, languages,
+   occlusions, and deterministic face selection remain unproven. Concurrent Wan2.2 generation and
+   mixed-model scheduling remain unmeasured. Sampling can miss allocations shorter than the
+   observed probe cadence.
 3. LPIPS is exercised but diagnostic pending representative threshold calibration. A privacy-reviewed
    identity similarity provider is not installed. Torchvision's AlexNet pretrained-weight terms also
    require intended-use review because torchvision disclaims blanket permission for pretrained models.
@@ -254,7 +273,8 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 
 1. Test additional representative motion/content classes and record failures without weakening the
    established visual gate; evaluate provider-native retakes when a class fails.
-2. Exercise LatentSync 1.5 on eligible dialogue and record sync QA, peak VRAM, and cleanup behavior.
+2. Expand LatentSync evidence across rights-cleared speakers, languages, occlusions, and negative
+   eligibility cases without weakening the current SyncNet and boundary gates.
 3. Calibrate LPIPS on representative accepted/rejected local outputs and add a privacy-reviewed
    opt-in identity metric as an isolated QA provider.
 4. Measure the replenishment controller with the real two-clip run, then tune the buffer target and

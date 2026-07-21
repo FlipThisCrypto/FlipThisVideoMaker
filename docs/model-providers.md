@@ -18,7 +18,7 @@ such as configured, protocol-tested, and exercised are intentionally distinct.
 | FramePack / SkyReels / InfiniteTalk | video/avatar | External service or CLI adapters | Evaluated/planned; no verified category-5 contract selected |
 | Practical-RIFE 4.25 | temporal frame interpolation | External official CLI argv | Runtime/model exercised on GPU 1; 641 unique 60-fps frames and exact endpoint-preserving 600-frame delivery |
 | LPIPS 0.1 / AlexNet | learned perceptual boundary QA | External local CPU CLI with strict JSON | Runtime/model exercised; real start/end distances persisted diagnostically |
-| LatentSync 1.5 | single-visible-face post-generation lip sync and SyncNet QA | External official CLI argv | Protocol/pipeline fixture-tested; weights/GPU unexercised |
+| LatentSync 1.5 | single-visible-face post-generation lip sync and SyncNet QA | External pinned official CLI argv | Runtime/weights exercised on GPU 1 for one eligible sample; unsuitable sample rejected |
 | Spatial upscalers | post-processing | Future isolated provider | Planned |
 
 WanGP model capabilities depend on the installed release and selected model. ComfyUI workflows must

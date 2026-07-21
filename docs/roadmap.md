@@ -5,7 +5,7 @@
 - Deterministic CPU mock studio and finalization workflow.
 - Versioned category-5 request/result contract and Alembic chain persistence.
 - Local Wan2.2 FLF and Practical-RIFE 4.25 exercised provider paths; legacy hosted adapters disabled.
-- LatentSync 1.5 isolated child-process adapter.
+- LatentSync 1.5 isolated child-process adapter and one real eligible-sample acceptance run.
 - Exact 10-second/60-fps/600-frame delivery and boundary/freeze/snap QA.
 - Actual-final-frame successor lineage, restart/retry, shared-boundary assembly, atomic HLS buffer,
   and full React workflow.
@@ -29,8 +29,9 @@ artifacts and recording failures without weakening the visual gate.
 
 ## Following phases
 
-1. Exercise LatentSync 1.5 on the speaking/no-speaker/hidden-mouth/multiple-face/no-speech/skip matrix;
-   retain only workflows with honest SyncNet and boundary evidence.
+1. Expand LatentSync 1.5 evidence across rights-cleared speakers/languages and the
+   speaking/no-speaker/hidden-mouth/multiple-face/no-speech/skip matrix; retain only workflows with
+   honest SyncNet, boundary, and visual evidence.
 2. Calibrate isolated LPIPS evidence and add opt-in privacy-reviewed identity QA.
 3. Use provider-native retake/extend or a true generative bridge when real outputs miss the target end;
    never use a visible morph or final-frame overwrite to pass.

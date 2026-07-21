@@ -89,12 +89,21 @@ approximately 10-second persisted audio Asset. A RIFE 25-fps intermediate matche
 input recommendation. Output must contain video and audio; SyncNet confidence ≥3 and AV offset
 within ±1 frame are required. The ordinary start/end delivery QA runs afterward.
 
-The evaluator runs in a unique workspace to avoid cross-worker `detect_results` collisions. Child
+The raw RIFE result is persisted separately, then normalized to exactly 250 CFR frames over 10.000
+seconds before inference. This avoids silently sending a 321-frame/12.84-second intermediate into a
+10-second lip-sync request. The evaluator runs in a unique workspace to avoid cross-worker
+`detect_results` collisions. Child
 process cancellation, timeout, configured numeric OOM, cleanup, atomic output, and redacted errors
-are handled. LatentSync cannot deterministically select among multiple faces; the API/UI say so.
+are handled. Health checks the pinned repository revision and all required model checksums, then
+performs a real CUDA/import probe. LatentSync cannot deterministically select among multiple faces;
+the API/UI say so.
 
-Evidence: **Implemented, unexercised** against weights/GPU. Official CLI/SyncNet argv and OOM cleanup
-fixtures plus a deterministic pipeline integration pass.
+Evidence: **Exercised** against official 1.5 weights on GPU 1 for one eligible real chain clip.
+SyncNet confidence was `6.81` with offset `0`; exact CFR-60/AAC delivery, endpoint QA, and visual
+review passed. End-to-end runtime was 167.99 seconds with a 7,629 MiB peak from an 18 MiB baseline.
+One unsuitable audio pairing was rejected at confidence `0.16` / offset `3`. This is narrow evidence,
+not a claim for arbitrary speakers, multiple faces, or source audio. Code is Apache-2.0; official
+weights are OpenRAIL++, whose use restrictions must be reviewed for the intended deployment.
 
 ### LPIPS 0.1 / AlexNet boundary QA
 

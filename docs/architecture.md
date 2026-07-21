@@ -98,5 +98,7 @@ The deterministic CPU mock path and two-clip orchestration fixture are exercised
 generation is exercised on GPU 1; two consecutive pinned live-action clips pass technical and agent
 visual QA. Their persisted actual-frame lineage and 1,199-frame production assembly pass without a
 duplicated shared boundary. Practical-RIFE 4.25 is exercised concurrently on both independent GPUs.
-The earlier synthetic changed-identity clip remains rejected, and LatentSync 1.5 remains implemented
-but unexercised. No pooled-memory claim is made.
+The earlier synthetic changed-identity clip remains rejected. LatentSync 1.5 is exercised as a
+separate exact-25-fps post-stage for one eligible real sample, including official SyncNet, boundary,
+audio, exact-600-frame delivery, visual, and GPU telemetry evidence; a mismatched sample was rejected.
+No pooled-memory claim or broad lip-sync-quality claim is made.

@@ -53,6 +53,9 @@ def _load_run(directory: Path) -> tuple[dict[str, Any], dict[str, Path]]:
         "contract_contact_sheet": directory / "evidence/contact-sheet.png",
         "native_contact_sheet": directory / "evidence/native-contact-sheet.png",
     }
+    face_contact_sheet = directory / "evidence/face-contact-sheet.png"
+    if face_contact_sheet.exists():
+        paths["face_contact_sheet"] = face_contact_sheet
     if not all(path.is_file() for path in paths.values()):
         raise ValueError("Acceptance review artifact is missing")
     expected_delivery = manifest.get("checksums", {}).get("delivery")

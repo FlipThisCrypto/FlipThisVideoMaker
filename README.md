@@ -128,7 +128,9 @@ are exercised. Local Wan2.2 generation has run on GPU 1, and Practical-RIFE 4.25
 run concurrently on GPU 0 and GPU 1 with real weights. Exact delivery and boundary QA pass; the
 original synthetic changed-identity test was rejected, while a pinned representative two-clip
 live-action chain passed visual review and exact shared-boundary assembly.
-LatentSync 1.5 has a tested argv integration but has not been run against real weights. Ollama and
+LatentSync 1.5 has also run locally on GPU 1 against an accepted real chain clip: one suitable
+single-face dialogue sample passed SyncNet, boundary, audio, exact-delivery, and visual review. A
+mismatched dialogue sample failed SyncNet honestly. Ollama and
 OpenAI-compatible planner contracts have protocol tests. Generic CLI numeric OOM classification and
 partial cleanup have protocol fixtures, while successful media commands remain unexercised. ComfyUI
 and WanGP headless paths are implemented/configurable but still need complete protocol fixtures and

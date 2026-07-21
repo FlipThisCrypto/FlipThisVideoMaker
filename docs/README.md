@@ -60,6 +60,10 @@ Start with the documents in this order when resuming implementation:
 - [0015 — Endpoint-preserving RIFE delivery](adr/0015-endpoint-preserving-rife-delivery.md)
 - [0016 — Isolated local LPIPS boundary QA](adr/0016-local-lpips-boundary-qa.md)
 - [0017 — Per-device GPU telemetry](adr/0017-per-device-gpu-telemetry.md)
+- [0018 — Independent dual-GPU acceptance](adr/0018-independent-dual-gpu-acceptance.md)
+- [0019 — Open live-action acceptance corpus](adr/0019-open-live-action-acceptance-corpus.md)
+- [0020 — Real two-clip chain acceptance](adr/0020-real-two-clip-chain-acceptance.md)
+- [0021 — Local LatentSync acceptance](adr/0021-local-latentsync-acceptance.md)
 
 `docs/current-status.md` is the authoritative handoff record. Update it and this map whenever a phase
 adds, removes, or renames a durable capability or document.

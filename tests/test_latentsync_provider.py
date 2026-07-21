@@ -20,6 +20,12 @@ def _runtime(
     config = repository / "configs" / "unet" / "stage2.yaml"
     checkpoint = repository / "checkpoints" / "latentsync_unet.pt"
     syncnet = repository / "checkpoints" / "auxiliary" / "syncnet_v2.model"
+    sfd = repository / "checkpoints" / "auxiliary" / "sfd_face.pth"
+    whisper = repository / "checkpoints" / "whisper" / "tiny.pt"
+    insightface_detection = (
+        repository / "checkpoints" / "auxiliary" / "models" / "buffalo_l" / "det_10g.onnx"
+    )
+    insightface_landmarks = insightface_detection.with_name("2d106det.onnx")
     for path in (
         python,
         repository / "scripts" / "inference.py",
@@ -27,6 +33,10 @@ def _runtime(
         config,
         checkpoint,
         syncnet,
+        sfd,
+        whisper,
+        insightface_detection,
+        insightface_landmarks,
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("fixture", encoding="utf-8")
@@ -39,6 +49,37 @@ def _runtime(
         syncnet,
         oom_exit_codes=oom_exit_codes,
     )
+
+
+@pytest.mark.asyncio
+async def test_latentsync_health_requires_pinned_weights_revision_and_cuda_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _runtime(tmp_path)
+
+    monkeypatch.setattr(
+        cli,
+        "checksum",
+        lambda path: cli._CHECKPOINT_SHA256[path.name],
+    )
+
+    def fake_run(
+        args: list[str],
+        _timeout: float,
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        stdout = f"{cli._RUNTIME_COMMIT}\n" if args[0] == "git" else ""
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    monkeypatch.setattr(cli, "run", fake_run)
+
+    health = await provider.health()
+
+    assert health["ok"] is True
+    assert health["checkpoints_verified"] is True
+    assert health["runtime_revision_verified"] is True
+    assert health["cuda_runtime_verified"] is True
 
 
 @pytest.mark.asyncio
@@ -87,6 +128,41 @@ async def test_latentsync_uses_official_cli_shape_atomic_output_and_syncnet_qa(
     assert result.sync_qa_passed
     assert result.sync_confidence == 4.25
     assert provider.info().generation_category == "performance_conditioned_video"
+
+
+@pytest.mark.asyncio
+async def test_latentsync_evaluator_isolates_work_but_exposes_pinned_checkpoints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _runtime(tmp_path)
+    output = tmp_path / "output.mp4"
+    output.write_bytes(b"video")
+    observed: dict[str, object] = {}
+
+    def fake_run(
+        args: list[str],
+        _timeout: float,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        evaluation_work = Path(str(kwargs["cwd"]))
+        observed["work"] = evaluation_work
+        assert (evaluation_work / "checkpoints").resolve() == (
+            provider.repository_directory / "checkpoints"
+        ).resolve()
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            "SyncNet confidence: 4.20\nAV offset: 0\n",
+            "",
+        )
+
+    monkeypatch.setattr(cli, "run", fake_run)
+
+    result = await provider._evaluate(output, tmp_path / "evaluation")
+
+    assert result == {"sync_confidence": 4.2, "av_offset_frames": 0}
+    assert Path(str(observed["work"])) != provider.repository_directory
 
 
 @pytest.mark.asyncio

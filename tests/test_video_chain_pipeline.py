@@ -143,6 +143,9 @@ class FixturePerceptualMetric:
 
 
 class FixtureLipSyncProvider:
+    def __init__(self) -> None:
+        self.input_facts: dict[str, object] | None = None
+
     async def process(
         self,
         video: Path,
@@ -151,6 +154,7 @@ class FixtureLipSyncProvider:
         *,
         seed: int | None,
     ) -> LipSyncRunOutput:
+        self.input_facts = inspect_frame_timing(video)
         run(
             [
                 "ffmpeg",
@@ -592,13 +596,14 @@ async def test_optional_lip_sync_preserves_asset_lineage_audio_and_boundary_qa(
     request = FirstLastFrameGenerationRequest.model_validate(values)
     chain = create_video_chain(db, project, name="Speaking clip")
     clip, job = enqueue_chain_clip(db, project, chain, request)
+    lip_sync_provider = FixtureLipSyncProvider()
 
     assert job.input_asset_ids == [start.id, end.id, audio.id]
     output = await VideoChainPipeline(
         db,
         provider=FixtureMotionProvider(),
         interpolation_provider=FixtureInterpolationProvider(),
-        lip_sync_provider=FixtureLipSyncProvider(),
+        lip_sync_provider=lip_sync_provider,
     ).run(project, clip)
 
     facts = inspect_frame_timing(Path(output.file_path))
@@ -615,6 +620,14 @@ async def test_optional_lip_sync_preserves_asset_lineage_audio_and_boundary_qa(
     assert report["checks"]["audio_stream_present"] is True
     assert report["lip_sync"]["sync_confidence"] == 4.5
     assert report["asset_lineage"]["performance_conditioned_video_asset_id"]
+    assert lip_sync_provider.input_facts is not None
+    assert lip_sync_provider.input_facts["decoded_frame_count"] == 250
+    assert lip_sync_provider.input_facts["average_frame_rate"] == 25
+    assert lip_sync_provider.input_facts["duration_seconds"] == 10
+    raw_lip_source_id = clip.result_snapshot["provenance"]["lip_sync_interpolated_asset_id"]
+    raw_lip_source = db.get(Asset, raw_lip_source_id)
+    assert raw_lip_source is not None
+    assert raw_lip_source.type == "lip_sync_source_interpolated_raw_video"
     accept_chain_clip(db, clip)
     playlist = publish_hls_buffer(db, project, chain)
     segment = next((Path(playlist.file_path).parent / "segments").glob("segment-v2-*.ts"))

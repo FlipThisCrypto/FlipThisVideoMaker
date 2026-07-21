@@ -80,6 +80,18 @@ expected result, observed result, and stderr; diagnose before changing code.
   assembly with exactly 1,199 CFR-60 decoded frames, no duplicated join, and checksum-bound lineage
   and boundary evidence. The command must refuse overwrite, changed input, or missing visual review.
 
+### Optional P10 — Real local LatentSync acceptance
+
+- Setup: retain an accepted P9 chain; install the pinned LatentSync 1.5, Practical-RIFE, and LPIPS
+  runtimes outside Git; provide rights-cleared single-visible-speaker audio; isolate one GPU.
+- Action: run `scripts/run-open-lipsync-acceptance.py` as documented in
+  `docs/generative-video-workflow.md`, inspect all contact sheets, and record a checksum-bound visual
+  review.
+- Expect: verified code/weight/CUDA health; immutable exact-250-frame input and lip-sync Assets;
+  official SyncNet confidence ≥3 and offset within ±1; audio-bearing exact 10-second/CFR-60/600-frame
+  delivery; ordinary endpoint/no-snap QA; and per-stage GPU telemetry. Unsuitable audio must fail
+  rather than be labeled accepted.
+
 ## Intake rules
 
 - Every new feature ships with a concrete probe or automated assertion in the same change.

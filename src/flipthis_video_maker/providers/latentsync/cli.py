@@ -14,6 +14,7 @@ from flipthis_video_maker.media.ffmpeg import (
     MediaCancelled,
     MediaCommandError,
     MediaError,
+    checksum,
     probe,
     run,
 )
@@ -28,6 +29,15 @@ from flipthis_video_maker.providers.base.models import Capability, ProviderInfo
 
 _CONFIDENCE = re.compile(r"SyncNet confidence:\s*(-?\d+(?:\.\d+)?)")
 _OFFSET = re.compile(r"AV offset:\s*(-?\d+)")
+_RUNTIME_COMMIT = "a229c3948406bc2cf6eaf4873e662e70c6a04746"
+_CHECKPOINT_SHA256 = {
+    "latentsync_unet.pt": "6440b49a7ccceff56cdc001f5f17605216337f5bbd66fa360139768926e23f51",
+    "syncnet_v2.model": "961e8696f888fce4f3f3a6c3d5b3267cf5b343100b238e79b2659bff2c605442",
+    "sfd_face.pth": "d54a87c2b7543b64729c9a25eafd188da15fd3f6e02f0ecec76ae1b30d86c491",
+    "tiny.pt": "65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9",
+    "det_10g.onnx": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
+    "2d106det.onnx": "f001b856447c413801ef5c42091ed0cd516fcd21f2d6b79635b1e733a7109dbf",
+}
 
 
 class LipSyncRunOutput(BaseModel):
@@ -88,6 +98,20 @@ class LatentSyncCliProvider:
             self.unet_config_path,
             self.checkpoint_path,
             self.syncnet_checkpoint_path,
+            self.repository_directory / "checkpoints" / "auxiliary" / "sfd_face.pth",
+            self.repository_directory / "checkpoints" / "whisper" / "tiny.pt",
+            self.repository_directory
+            / "checkpoints"
+            / "auxiliary"
+            / "models"
+            / "buffalo_l"
+            / "det_10g.onnx",
+            self.repository_directory
+            / "checkpoints"
+            / "auxiliary"
+            / "models"
+            / "buffalo_l"
+            / "2d106det.onnx",
         )
         available = self.repository_directory.is_dir() and all(
             path.is_file() for path in health_paths
@@ -109,22 +133,112 @@ class LatentSyncCliProvider:
             cancellation_supported=True,
             progress_supported=False,
             notes=(
-                "Apache-2.0 local post-process. Official documentation reports an 8 GB "
-                "minimum for v1.5. It does not expose deterministic multi-face selection."
+                "Apache-2.0 code with OpenRAIL++ official weights. Official documentation "
+                "reports an 8 GB minimum for v1.5. It does not expose deterministic "
+                "multi-face selection."
             ),
         )
 
     async def health(self) -> dict[str, object]:
         info = self.info()
+        checkpoint_paths = {
+            "latentsync_unet.pt": self.checkpoint_path,
+            "syncnet_v2.model": self.syncnet_checkpoint_path,
+            "sfd_face.pth": self.repository_directory
+            / "checkpoints"
+            / "auxiliary"
+            / "sfd_face.pth",
+            "tiny.pt": self.repository_directory / "checkpoints" / "whisper" / "tiny.pt",
+            "det_10g.onnx": self.repository_directory
+            / "checkpoints"
+            / "auxiliary"
+            / "models"
+            / "buffalo_l"
+            / "det_10g.onnx",
+            "2d106det.onnx": self.repository_directory
+            / "checkpoints"
+            / "auxiliary"
+            / "models"
+            / "buffalo_l"
+            / "2d106det.onnx",
+        }
+        checkpoints_verified = False
+        if info.available:
+            try:
+                checkpoints_verified = await asyncio.to_thread(
+                    self._verify_checkpoint_integrity,
+                    checkpoint_paths,
+                )
+            except OSError:
+                checkpoints_verified = False
+        runtime_revision_verified = False
+        cuda_runtime_verified = False
+        if checkpoints_verified:
+            try:
+                revision = await asyncio.to_thread(
+                    run,
+                    ["git", "-C", str(self.repository_directory), "rev-parse", "HEAD"],
+                    30,
+                )
+                runtime_revision_verified = revision.stdout.strip() == _RUNTIME_COMMIT
+                if runtime_revision_verified:
+                    cuda = await asyncio.to_thread(
+                        run,
+                        [
+                            str(self.python),
+                            "-c",
+                            (
+                                "import torch; assert torch.cuda.is_available(); "
+                                "import diffusers, insightface, onnxruntime"
+                            ),
+                        ],
+                        120,
+                        cwd=self.repository_directory,
+                    )
+                    cuda_runtime_verified = cuda.returncode == 0
+            except (MediaCommandError, subprocess.TimeoutExpired):
+                pass
+        ready = (
+            info.available
+            and checkpoints_verified
+            and runtime_revision_verified
+            and cuda_runtime_verified
+        )
         return {
-            "ok": info.available,
-            "status": "ready" if info.available else "missing_external_runtime",
+            "ok": ready,
+            "status": "ready" if ready else "external_runtime_unverified",
             "python": shutil.which(str(self.python)) is not None or self.python.is_file(),
             "repository": self.repository_directory.is_dir(),
             "inference_script": (self.repository_directory / "scripts" / "inference.py").is_file(),
             "checkpoint": self.checkpoint_path.is_file(),
             "syncnet_checkpoint": self.syncnet_checkpoint_path.is_file(),
+            "face_detector_checkpoint": (
+                self.repository_directory / "checkpoints" / "auxiliary" / "sfd_face.pth"
+            ).is_file(),
+            "whisper_checkpoint": (
+                self.repository_directory / "checkpoints" / "whisper" / "tiny.pt"
+            ).is_file(),
+            "insightface_models": all(
+                (
+                    self.repository_directory
+                    / "checkpoints"
+                    / "auxiliary"
+                    / "models"
+                    / "buffalo_l"
+                    / filename
+                ).is_file()
+                for filename in ("det_10g.onnx", "2d106det.onnx")
+            ),
+            "checkpoints_verified": checkpoints_verified,
+            "runtime_revision_verified": runtime_revision_verified,
+            "cuda_runtime_verified": cuda_runtime_verified,
         }
+
+    @staticmethod
+    def _verify_checkpoint_integrity(checkpoint_paths: dict[str, Path]) -> bool:
+        return all(
+            checksum(path) == _CHECKPOINT_SHA256[name] for name, path in checkpoint_paths.items()
+        )
 
     async def process(
         self,
@@ -263,6 +377,13 @@ class LatentSyncCliProvider:
     async def _evaluate(self, output: Path, temp_dir: Path) -> dict[str, float | int]:
         evaluation_work = temp_dir.parent / "syncnet-work"
         evaluation_work.mkdir(parents=True, exist_ok=True)
+        repository_checkpoints = self.repository_directory / "checkpoints"
+        if not repository_checkpoints.is_dir():
+            raise ValueError("LatentSync evaluator checkpoints are missing")
+        (evaluation_work / "checkpoints").symlink_to(
+            repository_checkpoints,
+            target_is_directory=True,
+        )
         environment = dict(os.environ)
         existing = environment.get("PYTHONPATH")
         environment["PYTHONPATH"] = (

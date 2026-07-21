@@ -75,3 +75,16 @@ def test_visual_review_cannot_pass_missing_check_or_changed_delivery(tmp_path: P
     (directory / "delivery-600.mp4").write_bytes(b"changed")
     with pytest.raises(ValueError, match="checksum"):
         review._record(args)
+
+
+def test_visual_review_binds_optional_face_contact_sheet(tmp_path: Path) -> None:
+    review = _module()
+    directory, args = _run(tmp_path)
+    face_sheet = directory / "evidence" / "face-contact-sheet.png"
+    face_sheet.write_bytes(b"lip sync face evidence")
+
+    payload = review._record(args)
+
+    reviewed = payload["reviewed_artifacts"]
+    assert reviewed["face_contact_sheet"]["path"] == "evidence/face-contact-sheet.png"
+    assert reviewed["face_contact_sheet"]["sha256"] == review._sha256(face_sheet)
