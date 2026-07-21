@@ -10,7 +10,26 @@ The current selection rationale and primary sources are in
 
 ## Implemented first/last-frame generation
 
-### LTX-2.3 Pro hosted API — recommended
+### Wan2.2 I2V-A14B FP8 through ComfyUI — selected local provider
+
+`wan22-flf-gpu1` owns one dedicated loopback ComfyUI endpoint and one physical GPU queue. Its
+administrator-controlled graph uses the native `WanFirstLastFrameToVideo` node with separate
+persisted start and target images, two official FP8 diffusion stages, UMT5 encoder, and Wan VAE.
+It is genuine first/last-frame-conditioned generation—not a transition, morph, or interpolator.
+
+Health validates the exact graph contract/checksum, required node schemas, exact model filenames,
+ComfyUI version, CUDA availability, and exactly one visible device. Generation validates the
+immutable 848×480 request, submits 81 native frames at 8 fps for the 10-second 12 GB profile, polls structured
+history, supports cancellation, classifies only structured PyTorch OOM, bounds the MP4 download,
+publishes atomically, unloads models, and validates timing with FFmpeg. GPU queue mismatch is rejected
+at both API enqueue and worker execution.
+
+Evidence: **Implemented; runtime and one native generation Exercised** on ComfyUI v0.9.2 and one
+RTX 4070 12 GB. The 81-frame artifact passed technical timing/boundary inspection but failed visual
+production acceptance due to sliding/morphing and late duplicate-subject behavior. Install and
+checksum instructions are in the Linux guide. Model and generated data stay outside Git.
+
+### LTX-2.3 Pro hosted API — disabled compatibility adapter
 
 `ltx-video-pro` uses the official asynchronous `POST /v2/image-to-video` and
 `GET /v2/image-to-video/{id}` contracts. It sends project-owned first and last images as documented
@@ -24,10 +43,10 @@ immutable submitted request. Output URLs expire after 24 hours; the worker downl
 The bearer token is never sent to the result CDN. No server-side cancellation route is documented;
 local cancellation stops polling and records the remote Job ID.
 
-Evidence: **Implemented, unexercised**. Protocol fixtures prove payload, first/last Data URIs,
+Evidence: **Implemented, unexercised and not permitted by local-only policy**. Fixtures prove payload, first/last Data URIs,
 polling, download isolation, health, and structured errors. A live LTX account was not available.
 
-### Luma Ray 3.2 hosted API — fallback
+### Luma Ray 3.2 hosted API — disabled compatibility adapter
 
 `luma-ray` uses the official Agents API generation resource. It submits `type: video` with first and
 last keyframes at documented keyframe-grid indices 0 and 240 for a 10-second request, polls
@@ -35,8 +54,8 @@ queued/processing/completed/failed, downloads the native result without forwardi
 validates it with ffprobe. It records provider Job ID, API version header when present, timing,
 settings, errors, and the absence of server-side cancellation.
 
-Evidence: **Implemented, unexercised**. Complete protocol fixtures pass; no funded live account was
-available.
+Evidence: **Implemented, unexercised and not permitted by local-only policy**. Complete protocol
+fixtures pass.
 
 ## Implemented production post-processing
 
@@ -103,10 +122,9 @@ that it crossfades still frames. It cannot be selected by the production chain A
 
 ## Configuration and secrets
 
-Hosted API keys are read only from the environment-variable names in YAML (`LTXV_API_KEY` and
-`LUMA_AGENTS_API_KEY`). Discovery and errors never return values. External runtime paths are
-administrator-controlled. Providers are disabled by default. Enable a provider only after reviewing
-its exact terms and making its health probe pass.
+Legacy hosted API entries remain disabled. The selected path needs no API key and sends no media off
+the workstation. External runtime paths and workflow templates are administrator-controlled. Enable
+a provider only after its live health probe passes.
 
 Automatic profile fallback remains disabled for any adapter without a typed classifier plus
 provider-owned retry-safe cleanup. A remote interrupt or arbitrary "out of memory" text is not proof

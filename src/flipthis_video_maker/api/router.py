@@ -539,6 +539,12 @@ async def enqueue_video_chain_clip(
             body.provider_id,
         )
         provider_info = generation_provider.info()
+        expected_gpu_assignment = getattr(generation_provider, "gpu_assignment", None)
+        if expected_gpu_assignment is not None and body.gpu_assignment != expected_gpu_assignment:
+            raise VideoChainConflict(
+                f"Selected local provider owns queue {expected_gpu_assignment}, not "
+                f"{body.gpu_assignment}"
+            )
         if Capability.FIRST_LAST_FRAME_GENERATIVE_VIDEO not in provider_info.capabilities:
             raise VideoChainConflict(
                 "Selected provider does not advertise true first/last-frame generation"

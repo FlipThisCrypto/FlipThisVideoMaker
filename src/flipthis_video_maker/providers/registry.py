@@ -11,6 +11,12 @@ from flipthis_video_maker.providers.base.models import Capability, ProviderInfo
 from flipthis_video_maker.providers.base.protocols import Provider, StoryPlanner
 from flipthis_video_maker.providers.cli.providers import GenericCLIImageProvider
 from flipthis_video_maker.providers.comfyui.client import ComfyUIProvider
+from flipthis_video_maker.providers.comfyui.wan_flf import (
+    MODEL_IDENTITY as WAN_FLF_MODEL_IDENTITY,
+)
+from flipthis_video_maker.providers.comfyui.wan_flf import (
+    ComfyUIWanFirstLastFrameProvider,
+)
 from flipthis_video_maker.providers.latentsync.cli import LatentSyncCliProvider
 from flipthis_video_maker.providers.ltx.client import LtxVideoProvider
 from flipthis_video_maker.providers.luma.client import LumaRayVideoProvider
@@ -37,6 +43,7 @@ class ProviderConfiguration(BaseModel):
     kind: Literal[
         "mock",
         "comfyui",
+        "comfyui_wan_flf",
         "wangp",
         "cli",
         "ollama",
@@ -52,6 +59,8 @@ class ProviderConfiguration(BaseModel):
     health_command: list[str] = Field(default_factory=list)
     submit_path: str | None = None
     workflow_template_directory: Path | None = None
+    workflow_template: Path | None = None
+    gpu_assignment: Literal["gpu0", "gpu1"] | None = None
     command: list[str] = Field(default_factory=list)
     oom_exit_codes: set[int] = Field(default_factory=set)
     python: Path | None = None
@@ -91,6 +100,13 @@ class ProviderConfiguration(BaseModel):
                 raise ValueError("The implemented LTX adapter supports LTX-2.3 Fast or Pro")
             if not self.api_key_env:
                 raise ValueError("LTX requires an API-key environment-variable name")
+        if self.kind == "comfyui_wan_flf":
+            if not self.endpoint or self.workflow_template is None:
+                raise ValueError("ComfyUI Wan FLF requires endpoint and workflow_template")
+            if self.model != WAN_FLF_MODEL_IDENTITY:
+                raise ValueError(f"ComfyUI Wan FLF supports only {WAN_FLF_MODEL_IDENTITY}")
+            if self.gpu_assignment not in {"gpu0", "gpu1"}:
+                raise ValueError("ComfyUI Wan FLF requires an exact GPU assignment")
         if self.kind == "rife" and (
             self.python is None or self.script is None or self.model_directory is None
         ):
@@ -220,13 +236,34 @@ def configured_image_provider(
 def configured_first_last_frame_provider(
     path: Path,
     provider_id: str,
-) -> LumaRayVideoProvider | LtxVideoProvider:
+) -> LumaRayVideoProvider | LtxVideoProvider | ComfyUIWanFirstLastFrameProvider:
     configured = load_provider_configuration(path)
     item = next((provider for provider in configured.providers if provider.id == provider_id), None)
     if item is None:
         raise KeyError(f"Unknown provider: {provider_id}")
     if not item.enabled:
         raise ValueError(f"Provider is disabled: {provider_id}")
+    if item.kind == "comfyui_wan_flf":
+        if (
+            item.endpoint is None
+            or item.model is None
+            or item.workflow_template is None
+            or item.gpu_assignment is None
+        ):
+            raise ValueError(f"Provider has incomplete Wan FLF configuration: {provider_id}")
+        workflow_template = item.workflow_template
+        if not workflow_template.is_absolute():
+            workflow_template = path.parent / workflow_template
+        return ComfyUIWanFirstLastFrameProvider(
+            item.id,
+            endpoint=item.endpoint,
+            workflow_template=workflow_template,
+            gpu_assignment=item.gpu_assignment,
+            model=item.model,
+            timeout_seconds=item.timeout_seconds,
+            poll_interval_seconds=item.poll_interval_seconds,
+            max_download_mb=item.max_download_mb,
+        )
     if item.kind not in {"luma", "ltx"} or item.endpoint is None or item.model is None:
         raise ValueError(f"Provider is not an implemented FLF provider: {provider_id}")
     api_key = os.environ.get(item.api_key_env) if item.api_key_env else None
@@ -382,6 +419,37 @@ def provider_records(path: Path) -> list[ProviderInfo]:
             )
             continue
         if (
+            item.kind == "comfyui_wan_flf"
+            and item.endpoint
+            and item.model
+            and item.workflow_template
+            and item.gpu_assignment
+        ):
+            workflow_template = item.workflow_template
+            if not workflow_template.is_absolute():
+                workflow_template = path.parent / workflow_template
+            record = ComfyUIWanFirstLastFrameProvider(
+                item.id,
+                endpoint=item.endpoint,
+                workflow_template=workflow_template,
+                gpu_assignment=item.gpu_assignment,
+                model=item.model,
+                timeout_seconds=item.timeout_seconds,
+                poll_interval_seconds=item.poll_interval_seconds,
+                max_download_mb=item.max_download_mb,
+            ).info()
+            records.append(
+                record.model_copy(
+                    update={
+                        "available": item.enabled and record.available,
+                        "notes": record.notes
+                        if item.enabled
+                        else "Disabled in provider configuration",
+                    }
+                )
+            )
+            continue
+        if (
             item.kind == "rife"
             and item.python is not None
             and item.script is not None
@@ -517,6 +585,30 @@ async def provider_health_records(path: Path) -> list[dict[str, Any]]:
                 poll_interval_seconds=item.poll_interval_seconds,
                 max_download_mb=item.max_download_mb,
                 max_inline_image_mb=item.max_inline_image_mb,
+            ).health()
+            results.append({"provider": item.id, **health})
+            continue
+        if item.kind == "comfyui_wan_flf":
+            if (
+                item.endpoint is None
+                or item.model is None
+                or item.workflow_template is None
+                or item.gpu_assignment is None
+            ):
+                results.append({"provider": item.id, "ok": False, "status": "missing_config"})
+                continue
+            workflow_template = item.workflow_template
+            if not workflow_template.is_absolute():
+                workflow_template = path.parent / workflow_template
+            health = await ComfyUIWanFirstLastFrameProvider(
+                item.id,
+                endpoint=item.endpoint,
+                workflow_template=workflow_template,
+                gpu_assignment=item.gpu_assignment,
+                model=item.model,
+                timeout_seconds=item.timeout_seconds,
+                poll_interval_seconds=item.poll_interval_seconds,
+                max_download_mb=item.max_download_mb,
             ).health()
             results.append({"provider": item.id, **health})
             continue

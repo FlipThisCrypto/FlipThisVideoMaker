@@ -16,6 +16,8 @@ from flipthis_video_maker.providers.base.models import Capability, ProviderInfo
 
 
 class HealthyGenerationProvider:
+    gpu_assignment = "gpu1"
+
     def info(self) -> ProviderInfo:
         return ProviderInfo(
             id="luma-ray",
@@ -214,10 +216,25 @@ async def test_chain_api_captures_server_validated_immutable_generation_job(
                 "provider_id": "luma-ray",
                 "provider_model": "ray-3.2",
                 "render_profile": "standard",
+                "gpu_assignment": "gpu1",
             },
         )
         assert unsupported.status_code == 409
         assert "negative prompt" in unsupported.json()["detail"]
+        wrong_queue = await client.post(
+            f"/api/v1/video-chains/{chain['id']}/clips",
+            json={
+                "start_frame_asset_id": assets[0]["id"],
+                "target_end_frame_asset_id": assets[1]["id"],
+                "prompt": "A performer crosses a room while the camera follows.",
+                "provider_id": "luma-ray",
+                "provider_model": "ray-3.2",
+                "render_profile": "standard",
+                "gpu_assignment": "gpu0",
+            },
+        )
+        assert wrong_queue.status_code == 409
+        assert wrong_queue.json()["detail"] == "Selected local provider owns queue gpu1, not gpu0"
         queued = await client.post(
             f"/api/v1/video-chains/{chain['id']}/clips",
             json={

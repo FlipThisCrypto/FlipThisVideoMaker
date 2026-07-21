@@ -118,7 +118,7 @@ class VideoChainClipCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=6000)
     negative_prompt: str = Field(default="", max_length=6000)
     duration_seconds: Literal[10] = 10
-    native_requested_fps: Literal[24] = 24
+    native_requested_fps: Literal[8, 24] = 24
     delivery_fps: Literal[60] = 60
     render_profile: str = Field(default="standard", min_length=1, max_length=40)
     seed: int | None = Field(default=None, ge=0, le=4_294_967_295)

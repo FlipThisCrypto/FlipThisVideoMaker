@@ -3,8 +3,8 @@
 ## Evidence status
 
 - Chain contract, migration, API/UI, lineage, exact delivery QA, shared-boundary assembly, HLS
-  publication, LTX/Luma protocol fixtures, and deterministic two-clip integration: **Exercised**.
-- Live LTX, live Luma, external Practical-RIFE, and external LatentSync: **Implemented, unexercised**.
+  publication, local Wan protocol fixtures, and deterministic two-clip integration: **Exercised**.
+- Local Wan runtime health: **Exercised**. Practical-RIFE and LatentSync: **Implemented, unexercised**.
 - Immutable next-target request/Job/Asset generation and deterministic/CLI fixtures: **Exercised**.
 - Playback-aware replenishment with deterministic target/video providers: **Exercised**.
 - Real target-image model and sustainable real-time replenishment: **Implemented, unexercised**.
@@ -13,8 +13,8 @@
 
 1. Create a project and open **Continuous video chains**.
 2. Create a chain and choose a persisted start-frame Asset and target ending-frame Asset.
-3. Select LTX-2.3 Pro (recommended) or Luma Ray 3.2, a 24-fps native profile, and an independent
-   `gpu0` or `gpu1` post-processing queue.
+3. Select local Wan2.2 FLF, the `wan-local-12gb` 8-fps native profile, and the matching isolated
+   `gpu0` or `gpu1` generation/post-processing queue.
 4. Describe subject motion, environmental motion, camera motion, and the natural approach to the
    target frame. The provider receives both boundary images; no transition effect is substituted.
 5. Optionally mark the shot as one clearly visible speaking face, select an approximately 10-second
@@ -38,21 +38,19 @@ production image-editing provider. The controller owns one replenishment Job at 
 next clip from the accepted tail's actual decoded frame, and may auto-accept only clips that pass the
 full delivery and continuity QA when that policy is enabled. Dialogue-dependent clips stop and ask
 for fresh audio rather than silently reusing speech. Failed or cancelled target Jobs require an
-operator retry; they do not cause unbounded paid requests.
+operator retry; they do not cause unbounded local GPU work.
 
 ## Provider configuration
 
-Secrets are environment variables only. Do not put their values in YAML.
+Install and start the isolated open-source runtime; no API key is used:
 
 ```bash
-export LTXV_API_KEY='replace-in-your-shell-or-secret-manager'
-# Optional fallback
-export LUMA_AGENTS_API_KEY='replace-in-your-shell-or-secret-manager'
+./scripts/install-wan22-flf.sh /absolute/external/runtime/root
+./scripts/run-wan22-flf.sh /absolute/external/runtime/root gpu1 8189
 ```
 
-Enable the corresponding entry in `config/providers.yaml` only after the credential is present.
-LTX-2.3 Pro requires the `final` 1920×1080/24-fps render profile. Luma supports the configured 720p
-or 1080p/24-fps profiles. Both adapters run an authenticated health probe before enqueue.
+The configured provider owns GPU 1 and port 8189. Its live health probe must validate the native FLF
+node, all four model files, one CUDA device, and the workflow checksum before enqueue.
 
 For automatic target images, configure the disabled `target-image-cli` argv template. It must invoke
 an administrator-installed image model that accepts the prior boundary as a real reference input.

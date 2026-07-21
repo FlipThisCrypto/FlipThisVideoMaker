@@ -18,6 +18,7 @@ export interface CreateVideoChainClipRequest {
   prompt: string;
   camera_direction: string;
   render_profile: string;
+  native_requested_fps: 8 | 24;
   gpu_assignment: "gpu0" | "gpu1";
   interpolation_mode: "rife";
   interpolation_provider_id: "rife-local";

@@ -1,6 +1,6 @@
 # ADR 0010: First/Last-Frame Generative Video Stack
 
-**Status:** Accepted; implementation fixture-tested, real providers unexercised
+**Status:** Provider selection superseded by ADR 0014; media and chain decisions remain accepted
 **Date:** 2026-07-20
 
 ## Context

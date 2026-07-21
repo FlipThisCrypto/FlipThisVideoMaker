@@ -7,9 +7,11 @@
 **Branch:** `codex/flf-generative-video`
 
 **Truthful status:** a complete provider-neutral first/last-frame chain vertical slice is implemented
-and exercised with deterministic CPU protocol/integration fixtures. LTX-2.3 Pro, Luma Ray 3.2,
-Practical-RIFE 4.25, and LatentSync 1.5 integrations are implemented but have not been exercised
-against live services, model weights, or CUDA. Production visual quality is therefore not proven.
+and exercised with deterministic CPU protocol/integration fixtures. A local Wan2.2 I2V-A14B FP8
+adapter is implemented and its isolated ComfyUI runtime, health probe, native generation, history
+collection, and media inspection are exercised on GPU 1. The first visual artifact was rejected.
+Practical-RIFE 4.25 and LatentSync 1.5 integrations remain unexercised against real weights.
+Production visual quality is therefore not yet proven.
 Continuity-aware target-frame Jobs are exercised with deterministic and safe CLI fixtures; no real
 target-image model is installed. A durable playback-aware replenishment controller is exercised
 with deterministic providers, including concurrent claim, restart reconciliation, failure stop,
@@ -68,24 +70,21 @@ chain enqueue discovers and health-checks only a true category-5 provider plus a
 The deterministic fixture creates synthetic motion and blends for testability. It is evidence of
 orchestration/media correctness, not real generative visual quality.
 
-## Implemented hosted generation providers
+## Local first/last-frame generation provider
 
-### LTX-2.3 Pro — recommended, unexercised
+### Wan2.2 I2V-A14B FP8 / ComfyUI
 
-The async LTX V2 adapter uses documented first and last Data URI inputs, exact 10-second
-1920×1080/24-fps intent, async submit/poll/download, structured failure types, `Retry-After`, 24-hour
-result retention handling, authenticated health, safe download without credential forwarding,
-bounded output, atomic move, and ffprobe validation. Provider-generated audio is disabled so dialogue
-remains a separate persisted Asset. Protocol fixtures pass.
+The selected provider uses an administrator-owned graph derived from the official native
+`WanFirstLastFrameToVideo` workflow. It validates exact nodes, model filenames, graph checksum, one
+visible CUDA device, model identity, request dimensions/timing/settings, safe output paths, bounded
+downloads, atomic publication, and FFmpeg timing. It implements local upload, async polling,
+progress, cancellation, structured PyTorch OOM classification, and retry-safe model cleanup.
 
-### Luma Ray 3.2 — fallback, unexercised
+The external runtime is pinned to ComfyUI v0.9.2 and four checksummed official Wan2.2 files. It runs
+with maximum offload on GPU 1 only. The adapter, live health probe, and native generation are
+**Exercised**; the artifact failed visual production acceptance as recorded below. Hosted providers
+remain disabled compatibility code and are outside the local-only policy.
 
-The Luma Agents adapter submits documented first/final keyframes at indices 0/240, polls documented
-states, handles structured errors/rate limits, isolates presigned downloads from auth, and validates
-native media. Protocol fixtures pass.
-
-Neither reviewed hosted API documents server-side cancellation. Local cancellation stops polling,
-records the remote Job ID, and prevents local publication but may not prevent hosted cost.
 
 ## Delivery and QA
 
@@ -176,7 +175,8 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
   and admission. Two RTX 4070 12,282 MB cards were previously discovered. No pooled VRAM, NVLink, or
   model-parallel claim is made.
 - RIFE/LatentSync inherit the one worker-visible GPU and never invent an upstream device flag.
-- No real generation, RIFE, or LatentSync CUDA workload has been measured on either device.
+- A Wan2.2 FLF CUDA workload has been attempted on GPU 1; exact outcome is in the validation matrix.
+  RIFE and LatentSync remain unmeasured.
 
 ## Validation matrix
 
@@ -184,36 +184,40 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
 | Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0006`, downgrade to `0005`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, revision `0006` |
-| Ruff / formatting / strict MyPy | Passed; 105 files formatted, 66 source files type-checked |
+| Ruff / formatting / strict MyPy | Passed; 107 files formatted, 67 source files type-checked |
 | Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
 | Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
-| Complete pytest | Passed; 172 tests in 111.66 seconds |
+| Complete pytest | Passed; 176 tests in 116.22 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
 | Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.9 seconds |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.2 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
-| Real backend acceptance | **Blocked: no hosted credential or external RIFE/LatentSync runtime available** |
+| Local Wan2.2 health | Passed on ComfyUI v0.9.2, GPU 1 isolated as the sole visible RTX 4070, all required nodes/models present |
+| Local 24-fps generation | Failed honestly: 241 frames at 854×480 exhausted the GPU's 11.6 GiB usable VRAM under both low and maximum offload; structured OOM classification passed and no output was published |
+| Local 8-fps generation | Completed in 16m40s: 81 decoded unique frames, CFR 8 fps, 10.125 s, 848×480, no adjacent duplicates; effective real-time factor 98.8× slower than playback. Temporary artifact SHA-256 `7e3ff29df67c21b22716787e013819be51d246277d45e12d3f4c77eaf96cf083` |
+| Native boundary evidence | Start MAE 0.0191 / SSIM 0.9960; end MAE 0.0268 / SSIM 0.9969; last-step MAE 0.0143 / SSIM 0.9158 |
+| Visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; not evidence of live-action quality or a production pass |
 
 ## Known limitations and blockers
 
-1. The Definition of Done's real visual acceptance is not met. No live LTX/Luma generation exists,
-   so meaningful motion, coherence, endpoint convergence, identity, and no-snap quality are unproven.
+1. The Definition of Done's real visual acceptance is not met. The first native artifact converged
+   on both boundaries but visibly slid/morphed and duplicated its subject near the ending.
 2. Practical-RIFE and LatentSync are not installed at configured paths. CUDA VRAM/runtime/concurrency,
    cleanup, and quality are unmeasured.
 3. LPIPS and privacy-reviewed identity similarity are not installed. Current perceptual evidence is
    dHash plus SSIM/MAE/RMSE.
-4. Hosted generation cannot be remotely cancelled through the reviewed APIs.
+4. ComfyUI boundary uploads remain in its local external input directory and require retention cleanup.
 5. Autonomous replenishment is exercised only with deterministic providers. Real provider latency,
-   cost, HLS browser support, buffer sizing, and sustainable real-time factor are not proven.
+   HLS browser support, buffer sizing, and sustainable real-time factor are not proven.
 6. PostgreSQL `SKIP LOCKED`, distributed admission, and enforced configured worker concurrency
    remain absent. Current leases are a single-host SQLite safety boundary.
 7. Authentication remains local-only by default. Do not expose the service publicly as-is.
-8. Exact hosted/model/output/privacy/commercial terms require administrator review before enablement.
+8. Operators must review source-media rights and retain/delete local generated media appropriately.
 
 ## Next execution order
 
-1. Install/enable Practical-RIFE 4.25, fund one LTX account, and run the documented real two-clip
-   acceptance. Inspect actual frames/contact sheets and record cost, timing, FPS, VRAM, and quality.
+1. Improve local Wan conditioning/input strategy until a native artifact passes the no-morph visual
+   gate, then install/enable Practical-RIFE and run the documented real two-clip acceptance.
 2. Fix every real-output QA deficiency, prioritizing natural end convergence and shared-boundary
    continuity; evaluate provider-native retake/bridge remediation if needed.
 3. Exercise one independent RIFE workload on each RTX 4070, then LatentSync 1.5 on eligible dialogue;

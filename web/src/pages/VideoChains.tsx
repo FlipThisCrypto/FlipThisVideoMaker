@@ -50,10 +50,10 @@ export function VideoChains() {
   const [targetAssetId, setTargetAssetId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [cameraDirection, setCameraDirection] = useState("natural");
-  const [providerId, setProviderId] = useState("ltx-video-pro");
-  const [renderProfile, setRenderProfile] = useState("final");
+  const [providerId, setProviderId] = useState("wan22-flf-gpu1");
+  const [renderProfile, setRenderProfile] = useState("wan-local-12gb");
   const [gpuAssignment, setGpuAssignment] = useState<"gpu0" | "gpu1">(
-    "gpu0",
+    "gpu1",
   );
   const [branchPredecessorId, setBranchPredecessorId] = useState("");
   const [audioAssetId, setAudioAssetId] = useState("");
@@ -111,6 +111,7 @@ export function VideoChains() {
   );
   const generationProviders = (providers.data ?? []).filter(
     (provider) =>
+      provider.available &&
       provider.generation_category ===
       "first_last_frame_generative_video",
   );
@@ -183,7 +184,7 @@ export function VideoChains() {
     else if (!selectedProvider.available)
       reasons.push(`${selectedProvider.name} is disabled or its credential is missing.`);
     if (selectedHealth?.ok !== true)
-      reasons.push("The generation provider has not passed its authenticated health probe.");
+      reasons.push("The generation provider has not passed its live runtime health probe.");
     if (!rifeProvider?.available)
       reasons.push("The external Practical-RIFE runtime or weights are unavailable.");
     if (rifeHealth?.ok !== true)
@@ -270,6 +271,7 @@ export function VideoChains() {
         prompt,
         camera_direction: cameraDirection,
         render_profile: renderProfile,
+        native_requested_fps: renderProfile === "wan-local-12gb" ? 8 : 24,
         gpu_assignment: gpuAssignment,
         interpolation_mode: "rife",
         interpolation_provider_id: "rife-local",
@@ -544,7 +546,7 @@ export function VideoChains() {
             <h2 className="text-xl font-bold">Generate the next clip</h2>
             <p className="mt-1 text-sm text-slate-400">
               The server will condition the selected production model on both images, preserve its native
-              24-fps output, run RIFE, then prove exactly 600 displayed frames at 60 fps.
+              native output, run RIFE, then prove exactly 600 displayed frames at 60 fps.
               Optional LatentSync remains a separate 25-fps performance stage and is
               revalidated against both boundary frames before review.
             </p>
@@ -558,7 +560,10 @@ export function VideoChains() {
                     onChange={(event) => {
                       const nextProvider = event.target.value;
                       setProviderId(nextProvider);
-                      if (nextProvider.startsWith("ltx-")) setRenderProfile("final");
+                      if (nextProvider === "wan22-flf-gpu1") {
+                        setRenderProfile("wan-local-12gb");
+                        setGpuAssignment("gpu1");
+                      }
                     }}
                   >
                     {generationProviders.map((provider) => (
@@ -567,7 +572,7 @@ export function VideoChains() {
                       </option>
                     ))}
                     {generationProviders.length === 0 && (
-                      <option value="ltx-video-pro">LTX-2.3 Pro (not configured)</option>
+                      <option value="wan22-flf-gpu1">Local Wan2.2 FLF (not configured)</option>
                     )}
                   </select>
                 </label>
@@ -579,10 +584,9 @@ export function VideoChains() {
                       value={renderProfile}
                       onChange={(event) => setRenderProfile(event.target.value)}
                     >
-                      <option value="standard" disabled={providerId.startsWith("ltx-")}>
-                        720p · 24 fps native · Luma only
+                      <option value="wan-local-12gb">
+                        848×480 · 8 fps native · local 12 GB
                       </option>
-                      <option value="final">1080p · 24 fps native</option>
                     </select>
                   </label>
                   <label>

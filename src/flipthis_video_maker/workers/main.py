@@ -539,6 +539,12 @@ async def _process_claimed_job(
                 get_settings().provider_config,
                 request.provider_id,
             )
+            expected_gpu_assignment = getattr(provider, "gpu_assignment", None)
+            if (
+                expected_gpu_assignment is not None
+                and job.gpu_assignment != expected_gpu_assignment
+            ):
+                raise RuntimeError("Local generation provider queue does not match the claimed Job")
             output = await VideoChainPipeline(
                 db,
                 provider=provider,

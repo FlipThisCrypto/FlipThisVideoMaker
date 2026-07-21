@@ -13,12 +13,12 @@ boundary. Render and shot-regeneration jobs
 capture immutable effective profiles; typed provider-owned image/video OOM recovery can safely
 advance a captured lower-profile chain without changing GPU or Job attempt.
 
-The new first/last-frame chain path is implemented end to end: immutable Asset-ID requests, hosted
-LTX-2.3 Pro and Luma Ray 3.2 adapters, native-output preservation, Practical-RIFE delivery,
+The new first/last-frame chain path is implemented end to end: immutable Asset-ID requests, local
+Wan2.2 native first/last-frame generation, native-output preservation, Practical-RIFE delivery,
 10-second/60-fps/600-frame QA, actual-last-frame continuation, 1,199-frame two-clip assembly, atomic
 HLS publication, optional LatentSync 1.5, and a complete React review workflow. Its provider
-protocols and deterministic integration are exercised; no live hosted generation or CUDA model run
-has been performed, so production visual quality remains explicitly unproven.
+protocols and deterministic integration are exercised; live CUDA evidence and remaining quality
+limits are recorded truthfully in current status.
 
 A separate immutable target-frame Job can create a future ending-image Asset from the prior decoded
 boundary through an administrator-configured image-editing CLI. Its deterministic and safe-argv
@@ -53,8 +53,15 @@ Open `http://127.0.0.1:5173`, create a project, save a story, choose **Plan mock
 storyboard**, and enqueue a render.
 
 For real continuous-motion chains, read the [generative video workflow](docs/generative-video-workflow.md)
-and [provider decision](docs/provider-decision.md), configure the external providers, then open a
+and [provider decision](docs/provider-decision.md), install the external local runtime, then open a
 project's **Continuous video chains** page.
+
+The selected generator uses only local open-source components:
+
+```bash
+./scripts/install-wan22-flf.sh /absolute/external/runtime/root
+./scripts/run-wan22-flf.sh /absolute/external/runtime/root gpu1 8189
+```
 
 Optional GPU workers use the logical-to-physical mappings in `config/workers.yaml`:
 
@@ -105,8 +112,8 @@ Use the [documentation map](docs/README.md) as the entry point for the full guid
 - **Planned:** no working protocol behavior exists yet.
 
 At present, deterministic planning/image/TTS/video providers and the CPU two-clip chain integration
-are exercised. LTX-2.3 Pro, Luma Ray 3.2, Practical-RIFE 4.25, and LatentSync 1.5 have tested
-protocol/argv integrations but have not been run against real services or model weights. Ollama and
+are exercised. The local Wan2.2 provider protocol and live health probe are exercised. Practical-RIFE
+4.25 and LatentSync 1.5 have tested argv integrations but have not been run against real weights. Ollama and
 OpenAI-compatible planner contracts have protocol tests. Generic CLI numeric OOM classification and
 partial cleanup have protocol fixtures, while successful media commands remain unexercised. ComfyUI
 and WanGP headless paths are implemented/configurable but still need complete protocol fixtures and

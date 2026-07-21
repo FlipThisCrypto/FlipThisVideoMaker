@@ -34,6 +34,7 @@ describe("video-chain API", () => {
       prompt: "Continuous walking and camera motion",
       camera_direction: "slow tracking shot",
       render_profile: "standard",
+      native_requested_fps: 24 as const,
       gpu_assignment: "gpu1" as const,
       interpolation_mode: "rife" as const,
       interpolation_provider_id: "rife-local" as const,

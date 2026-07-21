@@ -37,6 +37,16 @@ providers:
     poll_interval_seconds: 5
     max_download_mb: 2048
     max_inline_image_mb: 7
+  - id: wan22-flf-gpu1
+    kind: comfyui_wan_flf
+    enabled: true
+    endpoint: http://127.0.0.1:8189
+    workflow_template: ./comfyui-workflows/wan2.2-flf-api-v1.json
+    model: wan2.2-i2v-a14b-fp8
+    gpu_assignment: gpu1
+    timeout_seconds: 7200
+    poll_interval_seconds: 2
+    max_download_mb: 4096
   - id: rife-local
     kind: rife
     enabled: false

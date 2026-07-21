@@ -6,21 +6,22 @@
 
 ## Outcome
 
-LTX-2.3 Pro through the hosted asynchronous LTX API is the recommended production first/last-frame
-provider. Luma Ray 3.2 is the implemented hosted fallback. Practical-RIFE 4.25 is the delivery-frame
-interpolator, not a generator. LatentSync 1.5 is the optional local post-generation lip-sync stage.
+The selected generator is local Wan2.2 I2V-A14B FP8 through a pinned, isolated ComfyUI runtime and
+its native `WanFirstLastFrameToVideo` conditioning node. Practical-RIFE 4.25 is the local
+delivery-frame interpolator, not a generator. LatentSync 1.5 is the optional local post-generation
+lip-sync stage. All selected production components are open source and run on local equipment.
 
-Both hosted generation adapters are **Implemented** through protocol fixtures and are
-**Unexercised** against live accounts in this workspace. They must not be labeled production-proven
-until the real two-clip acceptance run passes. The deterministic FFmpeg path remains **Exercised**
-test infrastructure and is explicitly categorized as mock/test video.
+Hosted adapters remain disabled only for backward compatibility; they are not part of the selected
+or permitted deployment. The deterministic FFmpeg path remains **Exercised** test infrastructure
+and is explicitly categorized as mock/test video.
 
 ## First/last-frame candidates
 
 | Candidate | Verified boundary mode | 10 s | Native FPS / resolution | Extension / audio | Local hardware and license | Decision |
 |---|---|---:|---|---|---|---|
-| LTX-2.3 Pro API | `image_uri` plus `last_frame_uri`; last frame is limited to LTX-2.3 | Yes | 24/25/48/50 fps; 1080p, 1440p, 4K | Pro has extend, retake, and audio-to-video; image-to-video can generate synchronized audio | Hosted. LTX API terms and model/output terms require account review | **Recommended; Implemented, unexercised** |
-| Luma Ray 3.2 Agents API | Indexed video keyframes including first and final positions | Yes, also 5 s | 24-fps keyframe grid; 360p–1080p | No cancellation endpoint documented; no FLF audio conditioning documented | Hosted; API terms prohibit using API input/output to train models | **Fallback; Implemented, unexercised** |
+| Wan2.2 I2V-A14B FP8 / ComfyUI | Native `WanFirstLastFrameToVideo` start and end inputs | 81 frames encoded at 8 fps; RIFE required for delivery | Official template defaults to 640×640/81 frames; adapter uses 848×480 on 12 GB | No integrated lip sync | Apache-2.0 Wan2.2; GPL-3.0 ComfyUI; maximum system-RAM offload | **Selected local provider; protocol and live health Exercised** |
+| LTX-2.3 Pro API | `image_uri` plus `last_frame_uri`; last frame is limited to LTX-2.3 | Yes | 24/25/48/50 fps; 1080p, 1440p, 4K | Pro has extend, retake, and audio-to-video; image-to-video can generate synchronized audio | Hosted paid service | Rejected by local-only policy |
+| Luma Ray 3.2 Agents API | Indexed video keyframes including first and final positions | Yes, also 5 s | 24-fps keyframe grid; 360p–1080p | No cancellation endpoint documented; no FLF audio conditioning documented | Hosted paid service | Rejected by local-only policy |
 | Google Veo 3.1 | Official first-and-last-frame workflow | No; 4/6/8 s | Provider-specific; 8 s is the relevant documented maximum | Extension and generated audio exist in adjacent Veo workflows | Hosted commercial service | Rejected for the exact 10 s contract |
 | Runway-hosted Veo 3.1 | Changelog verifies first/last keyframes | No evidence of an exact 10 s FLF mode in the reviewed contract | Hosted | Vendor proxy adds another contract/retention boundary | Not selected |
 | Wan2.1 FLF 14B | Official FLF checkpoint/task | Yes in model workflows, but output contract is backend-specific | Official FLF example is 720p; official multi-GPU example uses 8 GPUs | No integrated lip-sync contract | Apache-2.0 code; model terms separate. No official evidence that FLF 14B fits one 12 GB GPU | Prepared local option only |
@@ -40,23 +41,24 @@ Primary sources:
 - [Wan2.1 official repository](https://github.com/Wan-Video/Wan2.1)
 - [Runway API changelog](https://docs.dev.runwayml.com/api-details/api_changelog/)
 
-## Why LTX-2.3 Pro leads
+## Why local Wan2.2 leads
 
-It is the strongest verified fit for this product contract: true start and last image inputs, an
-exact 10-second option, 24/48-fps native choices, 1080p or better delivery sources, asynchronous
-polling, a production-oriented Pro tier, and adjacent extend/retake/audio workflows. At the listed
-1080p Pro image-to-video rate of $0.08 per generated second, a 10-second generation is $0.80 before
-retries and local post-processing. This is a current list price, not a cost guarantee.
+Wan2.2 is the strongest verified open-source fit for the constraint: its official ComfyUI workflow
+accepts distinct starting and ending images in the native conditioning graph. ComfyUI's low-VRAM
+offload allows the two 14B FP8 stages to run with one visible 12 GB card and abundant system RAM.
+The provider submits documented `/upload/image`, `/prompt`, `/history`, `/view`, `/queue`,
+`/interrupt`, and `/free` contracts, accepts only a reviewed graph and safe MP4 output, bounds
+downloads, publishes atomically, and validates output timing with FFmpeg.
 
-The adapter uses Data URIs for project-owned keyframe Assets, enforces the documented encoded-size
-limit, submits `generate_audio: false`, polls only documented states, downloads a result immediately
-within the 24-hour retention window, validates it with ffprobe, and never forwards the bearer token
-to the result CDN. The API does not echo the model in its terminal status, so provenance records the
-model from the immutable submitted request and includes that limitation as a warning.
+The workstation's cards remain independent. One request is never described as using pooled 24 GB
+VRAM; separate clips may run concurrently only through independently isolated endpoints and queue
+locks. Runtime, model weights, boundary copies, and generated outputs remain outside Git.
 
 ## Frame-rate decision
 
-The generator's native output is always preserved. Standard generation requests 24 fps. Production
+The generator's native output is always preserved. The measured 12 GB Wan profile requests 8 fps;
+an attempted 241-frame/24-fps 854×480 generation exhausted the GPU even with maximum offload. The
+81-frame probe also proved ComfyUI normalizes 854 to 848 pixels, so the enforced profile is 848×480. Production
 delivery uses Practical-RIFE 4.25 to synthesize temporal intermediates, followed by an exact CFR
 encode. Delivery QA requires exactly 10.000 seconds, 60 fps, and 600 decoded frames. Frame
 duplication is not an accepted production interpolation method. The 60-fps file must never be called
@@ -87,11 +89,11 @@ selection, so the UI says so and does not pretend otherwise.
 
 ## Assumptions that still require a real run
 
-- Visual quality, target-end convergence, identity consistency, and last-frame naturalness are not
-  established by protocol fixtures.
-- LTX and Luma generation latency, sustainable real-time factor, and real rate-limit behavior are
-  unknown for the user's account.
-- LTX's returned MP4 must be measured rather than assumed to match requested native FPS.
+- One synthetic native run established strong endpoint convergence but failed visual acceptance due
+  to sliding/morphing and duplicate-subject behavior; identity consistency and live-action quality
+  remain unproven.
+- Wan2.2 generation latency, sustainable real-time factor, endpoint convergence, and peak RAM/VRAM
+  must be recorded from completed local outputs rather than inferred from configuration.
 - Practical-RIFE and LatentSync must be run independently on GPU 0 and GPU 1 before concurrency or
   VRAM claims become Exercised.
 - Two 12 GB cards are treated as separate devices; no model splitting or pooled 24 GB claim is made.
