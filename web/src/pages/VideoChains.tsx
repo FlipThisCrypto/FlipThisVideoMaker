@@ -7,6 +7,7 @@ import {
   changeVideoChainState,
   createVideoChain,
   createVideoChainClip,
+  generateVideoChainTarget,
   publishVideoChainStream,
   retryVideoChainClip,
   reviewVideoChainClip,
@@ -57,6 +58,7 @@ export function VideoChains() {
   const [lipSyncEligibility, setLipSyncEligibility] =
     useState<LipSyncEligibility>("explicit_skip");
   const [speakerLabel, setSpeakerLabel] = useState("");
+  const [targetProviderId, setTargetProviderId] = useState("target-image-cli");
 
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -69,6 +71,7 @@ export function VideoChains() {
   const assets = useQuery({
     queryKey: ["assets", projectId],
     queryFn: () => api<Asset[]>(`/projects/${projectId}/assets`),
+    refetchInterval: 5_000,
   });
   const providers = useQuery({
     queryKey: ["providers"],
@@ -106,6 +109,19 @@ export function VideoChains() {
     (provider) =>
       provider.generation_category ===
       "first_last_frame_generative_video",
+  );
+  const targetProviders = (providers.data ?? []).filter(
+    (provider) =>
+      provider.id !== "mock-image" &&
+      provider.capabilities.includes("image_generation") &&
+      provider.capabilities.includes("image_editing"),
+  );
+  const selectedTargetProvider =
+    targetProviders.find((provider) => provider.id === targetProviderId) ??
+    targetProviders[0];
+  const effectiveTargetProviderId = selectedTargetProvider?.id ?? targetProviderId;
+  const selectedTargetHealth = providerHealth.data?.find(
+    (health) => health.provider === effectiveTargetProviderId,
   );
   const selectedProvider = generationProviders.find(
     (provider) => provider.id === providerId,
@@ -268,6 +284,20 @@ export function VideoChains() {
       invalidate();
     },
   });
+  const generateTarget = useMutation({
+    mutationFn: () =>
+      generateVideoChainTarget(selectedChainId, {
+        predecessor_clip_id: predecessor?.id ?? null,
+        continuity_source_asset_id: resolvedStartAssetId,
+        provider_id: effectiveTargetProviderId,
+        provider_model: selectedTargetProvider!.model_identity,
+        prompt,
+        render_profile: renderProfile,
+        seed: (activeTail?.sequence_number ?? 0) + 1000,
+        gpu_assignment: gpuAssignment,
+      }),
+    onSuccess: invalidate,
+  });
   const review = useMutation({
     mutationFn: ({ clipId, operation }: { clipId: string; operation: "accept" | "reject" }) =>
       reviewVideoChainClip(clipId, operation),
@@ -346,7 +376,7 @@ export function VideoChains() {
               <option value="planned_target">Planned target frames</option>
               <option value="manual_target">Choose each target manually</option>
               <option value="auto_generate_target" disabled>
-                Auto-generate target (prepared, not configured)
+                Autonomous replenishment (controller pending)
               </option>
             </select>
           </label>
@@ -547,6 +577,67 @@ export function VideoChains() {
                   explanation="Conditioned as the provider's final keyframe and measured at displayed frame 599."
                 />
               </div>
+            </div>
+
+            <div className="mt-4 rounded border border-slate-700 p-4">
+              <h3 className="font-bold">Generate a future target frame</h3>
+              <p className="mt-1 text-sm text-slate-400">
+                This separate image-generation stage conditions on the current actual
+                boundary and creates a persisted target Asset. It does not count as video
+                motion; select the completed Asset above before generating the clip.
+              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label>
+                  <span className="label">Continuity-aware image provider</span>
+                  <select
+                    className="field"
+                    value={effectiveTargetProviderId}
+                    onChange={(event) => setTargetProviderId(event.target.value)}
+                  >
+                    {targetProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </option>
+                    ))}
+                    {targetProviders.length === 0 && (
+                      <option value="target-image-cli">
+                        Administrator target-image CLI (not configured)
+                      </option>
+                    )}
+                  </select>
+                </label>
+                <button
+                  className="button self-end"
+                  disabled={
+                    !selectedTargetProvider?.available ||
+                    selectedTargetHealth?.ok !== true ||
+                    !resolvedStartAssetId ||
+                    !prompt.trim() ||
+                    generateTarget.isPending
+                  }
+                  onClick={() => generateTarget.mutate()}
+                >
+                  Queue generated target frame
+                </button>
+              </div>
+              {!selectedTargetProvider?.available && (
+                <p className="mt-2 text-sm text-amber-200">
+                  Configure an administrator-controlled argv template with image-generation
+                  and continuity-reference support. Mock images are deliberately excluded
+                  from this production control.
+                </p>
+              )}
+              {generateTarget.isSuccess && (
+                <p className="mt-2 text-sm text-emerald-300">
+                  Target Job queued. Its validated immutable Asset will appear in the target
+                  selector when the worker completes it.
+                </p>
+              )}
+              {generateTarget.isError && (
+                <p className="mt-2 text-red-300" role="alert">
+                  {errorText(generateTarget.error)}
+                </p>
+              )}
             </div>
 
             <div className="mt-4 rounded border border-slate-700 p-4">

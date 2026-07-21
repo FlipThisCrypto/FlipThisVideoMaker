@@ -9,6 +9,14 @@ providers:
   - id: mock-video
     kind: mock
     enabled: true
+  - id: target-image-cli
+    kind: cli
+    enabled: false
+    command: []
+    health_command: []
+    model: administrator-configured
+    timeout_seconds: 1800
+    max_download_mb: 100
   - id: luma-ray
     kind: luma
     enabled: false

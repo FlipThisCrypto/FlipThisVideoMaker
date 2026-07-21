@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createVideoChainClip, retryVideoChainClip } from "./videoChains";
+import {
+  createVideoChainClip,
+  generateVideoChainTarget,
+  retryVideoChainClip,
+} from "./videoChains";
 
 function response(body: unknown) {
   return Promise.resolve(
@@ -68,5 +72,29 @@ describe("video-chain API", () => {
       "/api/v1/video-chain-clips/clip-1/retry?acknowledge_orphan_risk=true",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("generates a target from persisted Asset lineage without client paths", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() => response({ id: "target-job", state: "queued" }));
+    const request = {
+      predecessor_clip_id: "clip-1",
+      continuity_source_asset_id: "actual-last-asset",
+      provider_id: "target-image-cli",
+      provider_model: "flux-kontext-admin",
+      prompt: "Continue the live scene toward the next action beat.",
+      render_profile: "final",
+      seed: 1002,
+      gpu_assignment: "gpu0" as const,
+    };
+
+    await generateVideoChainTarget("chain-1", request);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/video-chains/chain-1/targets",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(request) }),
+    );
+    expect(JSON.stringify(request)).not.toContain("/home/");
   });
 });

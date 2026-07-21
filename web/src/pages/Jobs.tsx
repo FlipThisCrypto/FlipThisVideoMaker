@@ -77,6 +77,26 @@ export function Jobs() {
                 This Job has an invalid first/last-frame request snapshot and cannot run.
               </p>
             )}
+            {job.target_frame_generation && (
+              <div className="mt-3 rounded border border-slate-700 p-3 text-sm">
+                <p className="font-semibold">Continuity-aware target-frame generation</p>
+                <p className="text-slate-300">
+                  {job.target_frame_generation.provider_id} /{" "}
+                  {job.target_frame_generation.provider_model} ·{" "}
+                  {job.target_frame_generation.width}×{job.target_frame_generation.height} · seed{" "}
+                  {job.target_frame_generation.seed}
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Input is persisted Asset {job.target_frame_generation.continuity_source_asset_id}.
+                  This stage creates an ending-image target; it is not video generation.
+                </p>
+              </div>
+            )}
+            {job.target_frame_generation_error && (
+              <p className="mt-2 text-sm text-red-300" role="alert">
+                This Job has an invalid target-frame request snapshot and cannot run.
+              </p>
+            )}
             <div className="mt-3 flex gap-2">
               {job.log_path && (
                 <a className="button" href={`/api/v1/jobs/${job.id}/log`}>

@@ -47,6 +47,57 @@ def _png(color: str) -> bytes:
 
 
 @pytest.mark.asyncio
+async def test_chain_api_enqueues_an_immutable_automatic_target_job(
+    db: Session,
+    tmp_path: Path,
+) -> None:
+    app = create_app()
+
+    def database_override() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = database_override
+    app.dependency_overrides[get_settings] = lambda: Settings(data_dir=tmp_path / "projects")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        project = (await client.post("/api/v1/projects", json={"name": "Auto target"})).json()
+        upload = await client.post(
+            f"/api/v1/projects/{project['id']}/assets",
+            files={"file": ("source.png", _png("navy"), "image/png")},
+        )
+        assert upload.status_code == 201
+        source = upload.json()
+        chain = (
+            await client.post(
+                f"/api/v1/projects/{project['id']}/video-chains",
+                json={"name": "Generated targets", "continuation_mode": "auto_generate_target"},
+            )
+        ).json()
+        response = await client.post(
+            f"/api/v1/video-chains/{chain['id']}/targets",
+            json={
+                "continuity_source_asset_id": source["id"],
+                "provider_id": "mock-image",
+                "provider_model": "mock-pattern-v1",
+                "prompt": "Generate the next rain-soaked arcade target frame.",
+                "render_profile": "standard",
+                "gpu_assignment": "gpu0",
+            },
+        )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["target_frame_generation"]["continuity_source_asset_id"] == source["id"]
+    assert response.json()["target_frame_generation_error"] is None
+    job = db.get(Job, response.json()["id"])
+    assert job is not None
+    assert job.job_type == "video_chain_target_generation"
+    snapshot = job.payload["target_frame_generation_v1"]
+    assert snapshot["continuity_source_asset_id"] == source["id"]
+    assert snapshot["width"] == 1280 and snapshot["height"] == 720
+    assert job.input_asset_ids == [source["id"]]
+
+
+@pytest.mark.asyncio
 async def test_chain_api_captures_server_validated_immutable_generation_job(
     db: Session,
     tmp_path: Path,

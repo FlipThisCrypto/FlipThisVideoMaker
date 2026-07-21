@@ -77,6 +77,11 @@ written atomically; successor segment frame 0 is trimmed to avoid the shared bou
 Buffer state reports observed generation time and whether it keeps up. Exhaustion pauses/rebuffers;
 the system does not call a finite playlist literally infinite.
 
+Future target images are a separate Job/Asset stage. An immutable target request references only a
+persisted continuity-source Asset; a production provider must advertise image editing and receive
+that prior decoded boundary as an argv argument. The resulting checksummed Asset is checkpointed for
+retry and is never mislabeled as video motion. Automatic playback-aware scheduling remains separate.
+
 ## Current execution status
 
 The deterministic CPU mock path and deterministic two-clip category-5 orchestration fixture are

@@ -44,6 +44,8 @@ class ProviderInfo(BaseModel):
 class ImageRequest(BaseModel):
     prompt: str
     output_path: Path
+    negative_prompt: str = ""
+    reference_image: Path | None = None
     width: int = 854
     height: int = 480
     seed: int = 42

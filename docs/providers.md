@@ -66,6 +66,20 @@ are handled. LatentSync cannot deterministically select among multiple faces; th
 Evidence: **Implemented, unexercised** against weights/GPU. Official CLI/SyncNet argv and OOM cleanup
 fixtures plus a deterministic pipeline integration pass.
 
+## Chain target-image generation
+
+`target-image-cli` is a provider-neutral production image-generation/editing boundary for creating a
+future chain ending frame from the prior decoded boundary Asset. Its command is an administrator-owned
+argument array with explicit `{reference_image}`, `{prompt}`, `{negative_prompt}`, `{width}`,
+`{height}`, `{seed}`, and `{output}` placeholders. The application never uses a shell or invents a
+model's flags. It requires an independent health command, reaps the subprocess group on cancellation,
+validates PNG format/dimensions/bounded size, atomically publishes it, and records its immutable
+request digest and Asset parent.
+
+Evidence: **Implemented, unexercised** with a real image model. The safe argv/reference/atomic-output
+fixture and deterministic target Job are **Exercised**. Configure an actual image-editing command and
+model identity before enabling it; the deterministic mock is excluded from the production UI.
+
 ## Existing adapters
 
 - Ollama planning uses official `/api/chat` structured output. **Implemented via fixtures**.
@@ -76,8 +90,9 @@ fixtures plus a deterministic pipeline integration pass.
   real backend run absent**.
 - WanGP uses the official external `wgp.py --process` interface; no Gradio route is guessed.
   **Prepared/partially implemented; execution fixture and real run absent**.
-- Generic CLI providers use administrator-defined argument arrays. Numeric OOM classification and
-  cleanup are fixture-tested; successful model generation is unexercised.
+- Generic CLI providers use administrator-defined argument arrays. Numeric OOM classification,
+  cancellation/reaping, cleanup, reference-image forwarding, and successful decoded-image output are
+  fixture-tested; a real model remains unexercised.
 
 ## Mock/test providers
 

@@ -140,6 +140,23 @@ export interface Job {
   render_profile_execution_error: string | null;
   first_last_frame_generation: FirstLastFrameGenerationRequest | null;
   first_last_frame_generation_error: string | null;
+  target_frame_generation: TargetFrameGenerationRequest | null;
+  target_frame_generation_error: string | null;
+}
+
+export interface TargetFrameGenerationRequest {
+  contract_version: 1;
+  chain_id: string;
+  predecessor_clip_id: string | null;
+  continuity_source_asset_id: string;
+  provider_id: string;
+  provider_model: string;
+  prompt: string;
+  negative_prompt: string;
+  width: number;
+  height: number;
+  seed: number;
+  provider_settings: Record<string, Record<string, unknown>>;
 }
 export interface WorkerStatus {
   id: string;

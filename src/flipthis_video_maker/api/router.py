@@ -26,6 +26,7 @@ from flipthis_video_maker.api.schemas import (
     RenderRead,
     ShotPatch,
     ShotRead,
+    TargetFrameGenerationCreate,
     VideoChainClipCreate,
     VideoChainClipRead,
     VideoChainCreate,
@@ -48,6 +49,7 @@ from flipthis_video_maker.contracts.video_generation import (
     FirstLastFrameGenerationRequest,
     LipSyncMode,
     RetryContinuation,
+    TargetFrameGenerationRequest,
 )
 from flipthis_video_maker.database.session import get_db
 from flipthis_video_maker.domain.enums import JobState, ShotStatus
@@ -70,6 +72,7 @@ from flipthis_video_maker.providers.base.models import Capability
 from flipthis_video_maker.providers.planning.deterministic import DeterministicStoryPlanner
 from flipthis_video_maker.providers.registry import (
     configured_first_last_frame_provider,
+    configured_image_provider,
     configured_interpolation_provider,
     configured_lip_sync_provider,
     configured_story_planner,
@@ -84,6 +87,7 @@ from flipthis_video_maker.services.render_finalization import (
     RenderFinalizationInputError,
     capture_render_finalization,
 )
+from flipthis_video_maker.services.target_frames import enqueue_target_frame_generation
 from flipthis_video_maker.services.video_chains import (
     VideoChainConflict,
     accept_chain_clip,
@@ -378,6 +382,80 @@ def list_video_chain_clips(chain_id: str, db: DB) -> list[VideoChainClip]:
             )
         )
     )
+
+
+@router.post(
+    "/video-chains/{chain_id}/targets",
+    response_model=JobRead,
+    status_code=202,
+)
+async def generate_video_chain_target(
+    chain_id: str,
+    body: TargetFrameGenerationCreate,
+    db: DB,
+    settings: Config,
+) -> JobRead:
+    chain = require(db, VideoChain, chain_id)
+    project = require(db, Project, chain.project_id)
+    if chain.state in {
+        ChainState.PAUSED.value,
+        ChainState.COMPLETE.value,
+        ChainState.CANCELLED.value,
+    }:
+        raise HTTPException(409, "Video chain cannot generate targets in its current state")
+    try:
+        provider = configured_image_provider(settings.provider_config, body.provider_id)
+        info = provider.info()
+        if Capability.IMAGE_GENERATION not in info.capabilities:
+            raise VideoChainConflict("Selected provider does not generate images")
+        if Capability.IMAGE_EDITING not in info.capabilities and body.provider_id != "mock-image":
+            raise VideoChainConflict(
+                "Automatic targets require a provider that conditions on the continuity source"
+            )
+        if info.model_identity != body.provider_model:
+            raise VideoChainConflict("Requested target model does not match capability discovery")
+        if body.provider_settings:
+            raise VideoChainConflict(
+                "The configured target-image CLI does not expose namespaced runtime settings"
+            )
+        health = await provider.health()
+        if health.get("ok") is not True:
+            raise VideoChainConflict("Target-frame provider health check failed")
+        execution = resolve_render_profile(settings, body.render_profile)
+        request = TargetFrameGenerationRequest(
+            chain_id=chain.id,
+            predecessor_clip_id=body.predecessor_clip_id,
+            continuity_source_asset_id=body.continuity_source_asset_id,
+            provider_id=body.provider_id,
+            provider_model=body.provider_model,
+            prompt=body.prompt,
+            negative_prompt=body.negative_prompt,
+            width=execution.profile.width,
+            height=execution.profile.height,
+            seed=body.seed,
+            provider_settings=body.provider_settings,
+        )
+        job = enqueue_target_frame_generation(
+            db,
+            project,
+            chain,
+            request,
+            gpu_assignment=body.gpu_assignment,
+        )
+        return JobRead.model_validate(job)
+    except AssetInputError as error:
+        status = {
+            "asset_not_found": 404,
+            "asset_project_mismatch": 400,
+            "asset_mime_unsupported": 422,
+            "asset_outside_project": 409,
+            "asset_file_missing": 410,
+            "asset_identity_mismatch": 409,
+            "asset_media_invalid": 422,
+        }[error.code]
+        raise HTTPException(status, str(error)) from error
+    except (KeyError, ValueError) as error:
+        raise HTTPException(409, str(error)) from error
 
 
 @router.post(

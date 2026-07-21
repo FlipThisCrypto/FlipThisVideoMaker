@@ -10,6 +10,8 @@
 and exercised with deterministic CPU protocol/integration fixtures. LTX-2.3 Pro, Luma Ray 3.2,
 Practical-RIFE 4.25, and LatentSync 1.5 integrations are implemented but have not been exercised
 against live services, model weights, or CUDA. Production visual quality is therefore not proven.
+Continuity-aware target-frame Jobs are exercised with deterministic and safe CLI fixtures; no real
+target-image model is installed.
 
 This file is the authoritative handoff. The durable product goal is in `MEMORY.md`; architecture
 decision ADR 0010 and `docs/provider-decision.md` record the selected current stack.
@@ -124,8 +126,20 @@ is unexercised.
   sustainable real-time factor, whether observed generation keeps up, and exhaustion behavior.
   Exhaustion is `pause_playback_and_rebuffer`.
 - Pause, resume, cancellation, publication, playlist, and validated segment APIs exist.
-- Automatic next-target creation and continuous asynchronous buffer replenishment remain Planned;
+- Automatic scheduling of target creation and continuous asynchronous buffer replenishment remain Planned;
   this is extensible buffered delivery, not a claim of literal infinity.
+
+## Target-frame generation
+
+- Immutable version-1 target requests capture chain/predecessor lineage, the persisted continuity
+  source Asset, provider/model, prompts, dimensions, seed, settings, and a checked digest.
+- A separate restart-safe Job creates a checksummed `generated_chain_target_frame` Asset with the
+  continuity source as parent. The output Asset ID is checkpointed and reused after retry.
+- The production generic CLI requires administrator-owned argv, exact model identity, and explicit
+  prompt/reference/output placeholders. It uses no shell, reaps cancellation, validates image decode,
+  and atomically moves output. Its protocol fixture is Exercised; a real model is unexercised.
+- Mock target generation is test-only and excluded from production UI controls. Target images are
+  explicitly labeled as still-image generation, never as continuous-motion video.
 
 ## Frontend
 
@@ -159,12 +173,13 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
 | Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0005`, downgrade to `0004`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, four lease columns |
-| Ruff / formatting / strict MyPy | Passed; 100 files formatted, 64 source files type-checked |
+| Ruff / formatting / strict MyPy | Passed; 102 files formatted, 65 source files type-checked |
 | Focused Job ownership/recovery tests | Passed; 45 Job, worker, API, and chain-contract tests |
-| Complete pytest | Passed; 154 tests in 109.99 seconds |
+| Focused target/provider/API tests | Passed; 24 target, CLI failure, registry, and chain API tests |
+| Complete pytest | Passed; 163 tests in 118.02 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
-| Frontend Vitest / lint / build | Passed; 13 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 24.5 seconds |
+| Frontend Vitest / lint / build | Passed; 14 tests, ESLint, TypeScript, and Vite production build |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 24.8 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Real backend acceptance | **Blocked: no hosted credential or external RIFE/LatentSync runtime available** |
 
@@ -177,7 +192,8 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 3. LPIPS and privacy-reviewed identity similarity are not installed. Current perceptual evidence is
    dHash plus SSIM/MAE/RMSE.
 4. Hosted generation cannot be remotely cancelled through the reviewed APIs.
-5. Automatic target generation and autonomous streaming replenishment are not implemented.
+5. Automatic scheduling of implemented target generation and autonomous playback-aware streaming
+   replenishment are not implemented.
 6. PostgreSQL `SKIP LOCKED`, distributed admission, and enforced configured worker concurrency
    remain absent. Current leases are a single-host SQLite safety boundary.
 7. Authentication remains local-only by default. Do not expose the service publicly as-is.

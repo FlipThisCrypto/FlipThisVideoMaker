@@ -99,6 +99,33 @@ class RetryContinuation(BaseModel):
     retry_of_job_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
+class TargetFrameGenerationRequest(BaseModel):
+    """Immutable provider-neutral request for creating a future chain target frame."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", str_strip_whitespace=True)
+
+    contract_version: Literal[1] = 1
+    chain_id: str = Field(min_length=1, max_length=36)
+    predecessor_clip_id: str | None = Field(default=None, min_length=1, max_length=36)
+    continuity_source_asset_id: str = Field(min_length=1, max_length=36)
+    provider_id: str = Field(min_length=1, max_length=120)
+    provider_model: str = Field(min_length=1, max_length=160)
+    prompt: str = Field(min_length=1, max_length=6000)
+    negative_prompt: str = Field(default="", max_length=6000)
+    width: int = Field(ge=256, le=8192)
+    height: int = Field(ge=256, le=8192)
+    seed: int = Field(ge=0, le=4_294_967_295)
+    provider_settings: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
+
+    def digest(self) -> str:
+        payload = json.dumps(
+            self.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+
 class LipSyncSettings(BaseModel):
     """Provider-neutral speaking-shot intent captured before lip-sync execution."""
 
@@ -275,5 +302,6 @@ __all__ = [
     "ProviderTiming",
     "RetryContinuation",
     "SafetySettings",
+    "TargetFrameGenerationRequest",
     "utc_now",
 ]

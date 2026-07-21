@@ -27,7 +27,9 @@ from flipthis_video_maker.contracts.video_generation import (
     LipSyncMode,
     LipSyncSettings,
     SafetySettings,
+    TargetFrameGenerationRequest,
 )
+from flipthis_video_maker.services.target_frames import TARGET_FRAME_REQUEST_KEY
 from flipthis_video_maker.services.video_chains import FLF_REQUEST_KEY
 
 
@@ -128,6 +130,21 @@ class VideoChainClipCreate(BaseModel):
     provider_settings: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     fallback_provider_ids: tuple[str, ...] = ()
     maximum_attempts: int | None = Field(default=None, ge=1, le=10)
+    gpu_assignment: Literal["gpu0", "gpu1"] = "gpu0"
+
+
+class TargetFrameGenerationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    predecessor_clip_id: str | None = Field(default=None, min_length=1, max_length=36)
+    continuity_source_asset_id: str = Field(min_length=1, max_length=36)
+    provider_id: str = Field(default="target-image-cli", min_length=1, max_length=120)
+    provider_model: str = Field(min_length=1, max_length=160)
+    prompt: str = Field(min_length=1, max_length=6000)
+    negative_prompt: str = Field(default="", max_length=6000)
+    render_profile: str = Field(default="standard", min_length=1, max_length=40)
+    seed: int = Field(default=42, ge=0, le=4_294_967_295)
+    provider_settings: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     gpu_assignment: Literal["gpu0", "gpu1"] = "gpu0"
 
 
@@ -445,6 +462,14 @@ class JobRead(ORMModel):
         default=None,
         validation_alias=AliasPath("payload", FLF_REQUEST_KEY),
     )
+    target_frame_generation: TargetFrameGenerationRequest | None = Field(
+        default=None,
+        validation_alias=AliasPath("payload", TARGET_FRAME_REQUEST_KEY),
+    )
+    target_frame_generation_error: str | None = Field(
+        default=None,
+        validation_alias=AliasPath("payload", TARGET_FRAME_REQUEST_KEY),
+    )
 
     @field_validator("render_profile_execution", mode="before")
     @classmethod
@@ -509,6 +534,29 @@ class JobRead(ORMModel):
             return None
         try:
             FirstLastFrameGenerationRequest.model_validate(value)
+        except ValidationError:
+            return "invalid_snapshot"
+        return None
+
+    @field_validator("target_frame_generation", mode="before")
+    @classmethod
+    def tolerate_invalid_target_generation(
+        cls, value: object
+    ) -> TargetFrameGenerationRequest | None:
+        if value is None:
+            return None
+        try:
+            return TargetFrameGenerationRequest.model_validate(value)
+        except ValidationError:
+            return None
+
+    @field_validator("target_frame_generation_error", mode="before")
+    @classmethod
+    def report_invalid_target_generation(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        try:
+            TargetFrameGenerationRequest.model_validate(value)
         except ValidationError:
             return "invalid_snapshot"
         return None

@@ -37,6 +37,17 @@ export interface CreateVideoChainClipRequest {
   };
 }
 
+export interface GenerateTargetFrameRequest {
+  predecessor_clip_id: string | null;
+  continuity_source_asset_id: string;
+  provider_id: string;
+  provider_model: string;
+  prompt: string;
+  render_profile: string;
+  seed: number;
+  gpu_assignment: "gpu0" | "gpu1";
+}
+
 export function createVideoChain(
   projectId: string,
   request: CreateVideoChainRequest,
@@ -52,6 +63,16 @@ export function createVideoChainClip(
   request: CreateVideoChainClipRequest,
 ) {
   return api<VideoChainClip>(`/video-chains/${chainId}/clips`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function generateVideoChainTarget(
+  chainId: string,
+  request: GenerateTargetFrameRequest,
+) {
+  return api<Job>(`/video-chains/${chainId}/targets`, {
     method: "POST",
     body: JSON.stringify(request),
   });

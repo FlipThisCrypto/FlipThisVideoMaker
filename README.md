@@ -20,6 +20,10 @@ HLS publication, optional LatentSync 1.5, and a complete React review workflow. 
 protocols and deterministic integration are exercised; no live hosted generation or CUDA model run
 has been performed, so production visual quality remains explicitly unproven.
 
+A separate immutable target-frame Job can create a future ending-image Asset from the prior decoded
+boundary through an administrator-configured image-editing CLI. Its deterministic and safe-argv
+fixtures are exercised; no real target-image model is configured in this workspace.
+
 ## Quick start
 
 Prerequisites: Python 3.12, `uv`, Node.js/Corepack, FFmpeg, and ffprobe.

@@ -1,4 +1,6 @@
+import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -168,6 +170,35 @@ async def test_cli_never_classifies_unconfigured_stderr_text_as_oom() -> None:
     assert caught.value.backend_code == "exit_code:17"
 
 
+@pytest.mark.asyncio
+async def test_cli_cancellation_reaps_the_child_process(tmp_path: Path) -> None:
+    pid_file = tmp_path / "child.pid"
+    provider = ConfiguredCLIProvider(
+        "configured-cli",
+        [
+            sys.executable,
+            "-c",
+            "import os,subprocess,sys,time; from pathlib import Path; "
+            "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+            "Path(sys.argv[1]).write_text(str(os.getpid())+' '+str(child.pid)); time.sleep(30)",
+            str(pid_file),
+        ],
+        {Capability.IMAGE_GENERATION},
+        cancel_requested=lambda: pid_file.is_file(),
+    )
+    started = time.monotonic()
+
+    with pytest.raises(ProviderExecutionError) as caught:
+        await provider.execute({}, operation="image_generation")
+
+    assert caught.value.failure_kind is ProviderFailureKind.CANCELLED
+    assert time.monotonic() - started < 3
+    process_ids = [int(value) for value in pid_file.read_text().split()]
+    for process_id in process_ids:
+        with pytest.raises(ProcessLookupError):
+            os.kill(process_id, 0)
+
+
 @pytest.mark.parametrize(
     "configuration",
     [
@@ -203,3 +234,32 @@ def test_cli_configuration_accepts_explicit_nonzero_oom_exit_codes() -> None:
     )
 
     assert configuration.oom_exit_codes == {42, 137}
+
+
+def test_enabled_target_cli_requires_real_health_and_continuity_arguments() -> None:
+    base = {
+        "id": "target-cli",
+        "kind": "cli",
+        "enabled": True,
+        "model": "exact-model-version",
+        "command": ["provider", "--prompt", "{prompt}", "--output", "{output}"],
+        "health_command": ["provider", "--health"],
+    }
+
+    with pytest.raises(ValidationError, match="reference_image"):
+        ProviderConfiguration.model_validate(base)
+    valid = ProviderConfiguration.model_validate(
+        {
+            **base,
+            "command": [
+                "provider",
+                "--prompt",
+                "{prompt}",
+                "--reference",
+                "{reference_image}",
+                "--output",
+                "{output}",
+            ],
+        }
+    )
+    assert valid.model == "exact-model-version"

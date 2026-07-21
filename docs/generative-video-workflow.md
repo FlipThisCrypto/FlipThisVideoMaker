@@ -5,7 +5,8 @@
 - Chain contract, migration, API/UI, lineage, exact delivery QA, shared-boundary assembly, HLS
   publication, LTX/Luma protocol fixtures, and deterministic two-clip integration: **Exercised**.
 - Live LTX, live Luma, external Practical-RIFE, and external LatentSync: **Implemented, unexercised**.
-- Automatic next-target image generation and autonomous buffer replenishment: **Prepared/Planned**.
+- Immutable next-target request/Job/Asset generation and deterministic/CLI fixtures: **Exercised**.
+- Real target-image model and autonomous buffer replenishment: **Implemented, unexercised / Planned**.
 
 ## Production flow
 
@@ -26,6 +27,11 @@
 9. Assemble accepted clips or publish the accepted contiguous prefix as HLS. Assembly and HLS trim
    displayed frame 0 from every successor so the shared boundary is not duplicated.
 
+To create the next ending image, choose a production image-editing provider in the target-frame
+panel. The Job receives only the actual boundary Asset ID and an immutable prompt/seed/profile
+snapshot. Its validated output appears as a new target Asset; this image stage is never labeled
+video motion.
+
 ## Provider configuration
 
 Secrets are environment variables only. Do not put their values in YAML.
@@ -39,6 +45,11 @@ export LUMA_AGENTS_API_KEY='replace-in-your-shell-or-secret-manager'
 Enable the corresponding entry in `config/providers.yaml` only after the credential is present.
 LTX-2.3 Pro requires the `final` 1920×1080/24-fps render profile. Luma supports the configured 720p
 or 1080p/24-fps profiles. Both adapters run an authenticated health probe before enqueue.
+
+For automatic target images, configure the disabled `target-image-cli` argv template. It must invoke
+an administrator-installed image model that accepts the prior boundary as a real reference input.
+The command is model-specific and therefore intentionally not guessed in repository configuration.
+Enable it only after `/api/v1/providers/health` succeeds.
 
 Install Practical-RIFE outside the core environment at the administrator-owned paths recorded in
 `config/providers.yaml`. Use the official Practical-RIFE repository, its Python ≤3.11-compatible
@@ -95,5 +106,6 @@ the old owner, receives a new boot-generation owner, and resumes any persisted i
 The playlist is HLS EVENT, updated atomically after each validated segment. `stream_state` exposes
 published segment count, validated buffer seconds, target seconds, end-to-end pipeline wall time,
 sustainable real-time factor, and whether observed generation keeps up with playback. If the buffer
-exhausts, the declared behavior is pause/rebuffer—not a false claim of an infinite stream. Automatic
-target creation and replenishment are not yet implemented.
+exhausts, the declared behavior is pause/rebuffer—not a false claim of an infinite stream. Target
+creation is now a restart-safe independent Job; automatic scheduling, QA acceptance policy, and
+playback-aware replenishment are not yet implemented.

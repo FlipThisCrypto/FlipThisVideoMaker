@@ -41,6 +41,7 @@ passes. Protocol fixtures prove contract behavior, not visual generation quality
 | Unsupported provider controls reach a Job | Capability gating rejects unsupported negative prompt, seed, motion strength, identity references, lip-sync, and interpolation choices before enqueue. The UI exposes only supported controls. |
 | Two 12 GB GPUs are treated as pooled memory | Worker configuration, device locks, and documentation treat them as independent devices. No model-parallel claim is made. Real CUDA concurrency remains unexercised. |
 | Finite output is called infinite streaming | The implementation exposes a finite HLS EVENT buffer, pipeline-wall real-time factor, and pause/rebuffer exhaustion policy. Automatic replenishment remains Planned. |
+| Automatic target generation is an unconditioned or untracked still | Production target providers must advertise image editing, receive the actual continuity Asset as a reference, publish a checksummed child Asset, and checkpoint its immutable request/output. The mock is excluded from production controls. |
 | Credentials or private media enter Git | Final exposure sweep found no credential value, personal path, generated media, database, key file, or sensitive history object. `test-key` and `replace-in-your-shell-or-secret-manager` are deliberate fixtures/placeholders. |
 
 ## Material findings resolved during review

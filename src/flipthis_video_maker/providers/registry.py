@@ -1,13 +1,15 @@
 import os
 from collections.abc import Callable
 from pathlib import Path
+from string import Formatter
 from typing import Any, Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from flipthis_video_maker.providers.base.models import ProviderInfo
+from flipthis_video_maker.providers.base.models import Capability, ProviderInfo
 from flipthis_video_maker.providers.base.protocols import Provider, StoryPlanner
+from flipthis_video_maker.providers.cli.providers import GenericCLIImageProvider
 from flipthis_video_maker.providers.comfyui.client import ComfyUIProvider
 from flipthis_video_maker.providers.latentsync.cli import LatentSyncCliProvider
 from flipthis_video_maker.providers.ltx.client import LtxVideoProvider
@@ -47,6 +49,7 @@ class ProviderConfiguration(BaseModel):
     enabled: bool = False
     endpoint: str | None = None
     health_path: str = "/"
+    health_command: list[str] = Field(default_factory=list)
     submit_path: str | None = None
     workflow_template_directory: Path | None = None
     command: list[str] = Field(default_factory=list)
@@ -105,6 +108,52 @@ class ProviderConfiguration(BaseModel):
             )
         if self.kind == "latentsync" and self.model != "LatentSync-1.5":
             raise ValueError("The implemented local adapter supports LatentSync-1.5")
+        if self.kind == "cli":
+            if self.enabled and not self.command:
+                raise ValueError("An enabled CLI provider requires an argv template")
+            if self.enabled and not self.model:
+                raise ValueError("An enabled CLI provider requires an exact model identity")
+            if self.enabled and not self.health_command:
+                raise ValueError("An enabled CLI provider requires a health command")
+            if any(
+                field is not None
+                for part in self.health_command
+                for _, field, _, _ in Formatter().parse(part)
+            ):
+                raise ValueError("CLI health command cannot contain runtime placeholders")
+            allowed = {
+                "prompt",
+                "negative_prompt",
+                "output",
+                "reference_image",
+                "width",
+                "height",
+                "seed",
+                "text",
+                "voice",
+                "speed",
+                "start_frame",
+                "end_frame",
+                "audio",
+                "duration",
+                "fps",
+            }
+            fields = {
+                field_name
+                for part in self.command
+                for _literal, field_name, _format, _conversion in Formatter().parse(part)
+                if field_name is not None
+            }
+            unknown = fields - allowed
+            if unknown:
+                raise ValueError(
+                    "CLI argv template contains unsupported placeholders: "
+                    + ", ".join(sorted(unknown))
+                )
+            if self.enabled and not {"prompt", "reference_image", "output"}.issubset(fields):
+                raise ValueError(
+                    "An enabled target-image CLI must use prompt, reference_image, and output"
+                )
         return self
 
 
@@ -137,6 +186,35 @@ def configured_story_planner(path: Path, provider_id: str) -> StoryPlanner:
         key = os.environ.get(item.api_key_env) if item.api_key_env else None
         return OpenAICompatibleStoryPlanner(item.endpoint, item.model, api_key=key)
     raise ValueError(f"Provider is not a story planner: {provider_id}")
+
+
+def configured_image_provider(
+    path: Path,
+    provider_id: str,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> MockImageProvider | GenericCLIImageProvider:
+    if provider_id == "mock-image":
+        return MockImageProvider()
+    configured = load_provider_configuration(path)
+    item = next((provider for provider in configured.providers if provider.id == provider_id), None)
+    if item is None:
+        raise KeyError(f"Unknown provider: {provider_id}")
+    if not item.enabled:
+        raise ValueError(f"Provider is disabled: {provider_id}")
+    if item.kind != "cli" or not item.command:
+        raise ValueError(f"Provider is not an implemented image generator: {provider_id}")
+    return GenericCLIImageProvider(
+        item.id,
+        item.command,
+        {Capability.IMAGE_GENERATION, Capability.IMAGE_EDITING},
+        timeout=int(item.timeout_seconds),
+        oom_exit_codes=item.oom_exit_codes,
+        cancel_requested=cancel_requested,
+        model_identity=item.model or "administrator-configured",
+        health_command=item.health_command,
+        max_output_mb=item.max_download_mb,
+    )
 
 
 def configured_first_last_frame_provider(
@@ -360,6 +438,28 @@ def provider_records(path: Path) -> list[ProviderInfo]:
                 )
             )
             continue
+        if item.kind == "cli" and item.command:
+            record = GenericCLIImageProvider(
+                item.id,
+                item.command,
+                {Capability.IMAGE_GENERATION, Capability.IMAGE_EDITING},
+                timeout=int(item.timeout_seconds),
+                oom_exit_codes=item.oom_exit_codes,
+                model_identity=item.model or "administrator-configured",
+                health_command=item.health_command,
+                max_output_mb=item.max_download_mb,
+            ).info()
+            records.append(
+                record.model_copy(
+                    update={
+                        "available": item.enabled and record.available,
+                        "notes": record.notes
+                        if item.enabled
+                        else "Disabled in provider configuration",
+                    }
+                )
+            )
+            continue
         records.append(
             ProviderInfo(
                 id=item.id,
@@ -473,6 +573,22 @@ async def provider_health_records(path: Path) -> list[dict[str, Any]]:
                 guidance_scale=item.guidance_scale,
                 enable_deepcache=item.enable_deepcache,
                 oom_exit_codes=item.oom_exit_codes,
+            ).health()
+            results.append({"provider": item.id, **health})
+            continue
+        if item.kind == "cli":
+            if not item.command:
+                results.append({"provider": item.id, "ok": False, "status": "missing_command"})
+                continue
+            health = await GenericCLIImageProvider(
+                item.id,
+                item.command,
+                {Capability.IMAGE_GENERATION, Capability.IMAGE_EDITING},
+                timeout=int(item.timeout_seconds),
+                oom_exit_codes=item.oom_exit_codes,
+                model_identity=item.model or "administrator-configured",
+                health_command=item.health_command,
+                max_output_mb=item.max_download_mb,
             ).health()
             results.append({"provider": item.id, **health})
             continue

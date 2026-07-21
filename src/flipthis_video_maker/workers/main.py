@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import os
 import signal
+import uuid
 from collections.abc import Callable
 from contextlib import nullcontext
 from datetime import UTC, datetime
@@ -40,12 +41,18 @@ from flipthis_video_maker.providers.base.errors import (
     ProviderFailureKind,
     ProviderOutOfMemoryError,
 )
-from flipthis_video_maker.providers.registry import configured_first_last_frame_provider
+from flipthis_video_maker.providers.base.models import Capability, ImageRequest
+from flipthis_video_maker.providers.base.protocols import OOMRecoverableProvider
+from flipthis_video_maker.providers.registry import (
+    configured_first_last_frame_provider,
+    configured_image_provider,
+)
 from flipthis_video_maker.scheduler.gpu import (
     GPULock,
     evaluate_vram_admission,
     probe_gpus,
 )
+from flipthis_video_maker.services.asset_inputs import validated_asset_input
 from flipthis_video_maker.services.job_logs import append_job_log
 from flipthis_video_maker.services.jobs import (
     claim_next,
@@ -56,13 +63,19 @@ from flipthis_video_maker.services.jobs import (
     reconcile_expired_job_leases,
 )
 from flipthis_video_maker.services.render_finalization import revalidate_render_finalization
+from flipthis_video_maker.services.target_frames import (
+    TARGET_FRAME_ASSET_ID_KEY,
+    target_request_from_job,
+)
 from flipthis_video_maker.services.video_chains import (
     CHAIN_CLIP_ID_KEY,
     FLF_REQUEST_KEY,
+    SUPPORTED_KEYFRAME_MIME_TYPES,
     request_from_clip,
     request_input_asset_ids,
 )
 from flipthis_video_maker.services.workers import WorkerHeartbeatReporter
+from flipthis_video_maker.storage.assets import register_asset
 
 logger = structlog.get_logger(__name__)
 WorkerStatusCallback = Callable[[WorkerState, str | None], None]
@@ -94,9 +107,7 @@ def _update_owned_running_job(
             Job.lease_expires_at > timestamp,
         )
     updated_id = db.execute(
-        statement.values(**values)
-        .returning(Job.id)
-        .execution_options(synchronize_session=False)
+        statement.values(**values).returning(Job.id).execution_options(synchronize_session=False)
     ).scalar_one_or_none()
     if updated_id is None:
         db.rollback()
@@ -377,6 +388,119 @@ async def _process_claimed_job(
             if candidate.output_asset_id is None:
                 raise RuntimeError("Shot regeneration completed without a candidate asset")
             output_asset_id = candidate.output_asset_id
+        elif job.job_type == "video_chain_target_generation":
+            target_request = target_request_from_job(job)
+            from flipthis_video_maker.domain.models import VideoChain, VideoChainClip
+
+            chain = db.get(VideoChain, target_request.chain_id)
+            if chain is None or chain.project_id != project.id:
+                raise RuntimeError("Target-frame Job chain does not belong to its project")
+            if target_request.predecessor_clip_id is not None:
+                predecessor = db.get(VideoChainClip, target_request.predecessor_clip_id)
+                if (
+                    predecessor is None
+                    or predecessor.chain_id != chain.id
+                    or predecessor.actual_last_frame_asset_id
+                    != target_request.continuity_source_asset_id
+                ):
+                    raise RuntimeError("Target-frame Job continuity lineage is stale")
+            source, source_path = validated_asset_input(
+                db,
+                project,
+                target_request.continuity_source_asset_id,
+                allowed_mime_types=SUPPORTED_KEYFRAME_MIME_TYPES,
+            )
+            if job.input_asset_ids != [source.id]:
+                raise RuntimeError("Target-frame Job inputs do not match its request snapshot")
+            staged_asset_id = (job.payload or {}).get(TARGET_FRAME_ASSET_ID_KEY)
+            if isinstance(staged_asset_id, str):
+                target_asset, _target_path = validated_asset_input(
+                    db,
+                    project,
+                    staged_asset_id,
+                    allowed_mime_types=SUPPORTED_KEYFRAME_MIME_TYPES,
+                )
+            else:
+                image_provider = configured_image_provider(
+                    get_settings().provider_config,
+                    target_request.provider_id,
+                    cancel_requested=cancellation_requested,
+                )
+                info = image_provider.info()
+                if (
+                    not info.available
+                    or Capability.IMAGE_GENERATION not in info.capabilities
+                    or info.model_identity != target_request.provider_model
+                ):
+                    raise RuntimeError(
+                        "Target-frame provider capability snapshot no longer matches"
+                    )
+                report_progress(0.1, "generating target frame")
+                target_path = (
+                    Path(project.root_asset_directory)
+                    / "chains"
+                    / chain.id
+                    / "targets"
+                    / f"target-{uuid.uuid4().hex}.png"
+                )
+                try:
+                    await image_provider.generate(
+                        ImageRequest(
+                            prompt=target_request.prompt,
+                            negative_prompt=target_request.negative_prompt,
+                            output_path=target_path,
+                            reference_image=source_path,
+                            width=target_request.width,
+                            height=target_request.height,
+                            seed=target_request.seed,
+                            label="automatic chain target",
+                        )
+                    )
+                except ProviderOutOfMemoryError as error:
+                    if not isinstance(image_provider, OOMRecoverableProvider):
+                        raise
+                    cleanup = await image_provider.cleanup_after_oom(error)
+                    record_provider_cleanup(error, cleanup)
+                    if cleanup.provider_id != error.provider_id:
+                        raise RuntimeError(
+                            "Target provider cleanup result does not match its OOM"
+                        ) from error
+                    raise
+                if cancellation_requested():
+                    raise PipelineCancelled("Target generation cancelled before publication")
+                target_asset = register_asset(
+                    db,
+                    project_id=project.id,
+                    shot_id=None,
+                    kind="generated_chain_target_frame",
+                    path=target_path,
+                    provider=target_request.provider_id,
+                    model=target_request.provider_model,
+                    prompt=target_request.prompt,
+                    seed=target_request.seed,
+                    parents=[source.id],
+                    generation_parameters={
+                        "request_digest": target_request.digest(),
+                        "chain_id": chain.id,
+                        "predecessor_clip_id": target_request.predecessor_clip_id,
+                        "negative_prompt": target_request.negative_prompt,
+                        "continuity_conditioned": Capability.IMAGE_EDITING in info.capabilities,
+                    },
+                )
+                _update_owned_running_job(
+                    db,
+                    job,
+                    {
+                        "payload": {
+                            **(job.payload or {}),
+                            TARGET_FRAME_ASSET_ID_KEY: target_asset.id,
+                        }
+                    },
+                    worker_id=worker_id,
+                    worker_instance_id=worker_instance_id,
+                )
+            report_progress(0.95, "target frame validated")
+            output_asset_id = target_asset.id
         elif job.job_type == "video_chain_clip_generation":
             clip_id = job.payload.get(CHAIN_CLIP_ID_KEY)
             if not isinstance(clip_id, str):
