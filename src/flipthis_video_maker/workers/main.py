@@ -25,17 +25,21 @@ from flipthis_video_maker.config.render_profiles import (
 )
 from flipthis_video_maker.config.settings import get_settings
 from flipthis_video_maker.config.workers import load_worker_configuration
+from flipthis_video_maker.contracts.video_generation import FirstLastFrameGenerationRequest
 from flipthis_video_maker.database.session import SessionLocal
 from flipthis_video_maker.domain.enums import JobState, WorkerState
 from flipthis_video_maker.domain.models import Asset, Job, Project
 from flipthis_video_maker.media.ffmpeg import MediaCancelled
 from flipthis_video_maker.pipeline.mock_pipeline import MockPipeline, PipelineCancelled
 from flipthis_video_maker.pipeline.shot_regeneration import MockShotRegenerator
+from flipthis_video_maker.pipeline.video_chain import VideoChainPipeline
 from flipthis_video_maker.providers.base.errors import (
     ProviderCleanupResult,
     ProviderExecutionError,
+    ProviderFailureKind,
     ProviderOutOfMemoryError,
 )
+from flipthis_video_maker.providers.registry import configured_first_last_frame_provider
 from flipthis_video_maker.scheduler.gpu import (
     GPULock,
     evaluate_vram_admission,
@@ -50,6 +54,12 @@ from flipthis_video_maker.services.jobs import (
     mark_succeeded,
 )
 from flipthis_video_maker.services.render_finalization import revalidate_render_finalization
+from flipthis_video_maker.services.video_chains import (
+    CHAIN_CLIP_ID_KEY,
+    FLF_REQUEST_KEY,
+    request_from_clip,
+    request_input_asset_ids,
+)
 from flipthis_video_maker.services.workers import WorkerHeartbeatReporter
 
 logger = structlog.get_logger(__name__)
@@ -265,6 +275,37 @@ async def _process_claimed_job(
             if candidate.output_asset_id is None:
                 raise RuntimeError("Shot regeneration completed without a candidate asset")
             output_asset_id = candidate.output_asset_id
+        elif job.job_type == "video_chain_clip_generation":
+            clip_id = job.payload.get(CHAIN_CLIP_ID_KEY)
+            if not isinstance(clip_id, str):
+                raise RuntimeError("Video chain Job has no clip ID")
+            from flipthis_video_maker.domain.models import VideoChain, VideoChainClip
+
+            clip = db.get(VideoChainClip, clip_id)
+            if clip is None:
+                raise RuntimeError("Video chain clip is missing")
+            chain = db.get(VideoChain, clip.chain_id)
+            if chain is None or chain.project_id != project.id:
+                raise RuntimeError("Video chain clip does not belong to the Job project")
+            request = request_from_clip(clip)
+            job_request = FirstLastFrameGenerationRequest.model_validate(
+                job.payload.get(FLF_REQUEST_KEY)
+            )
+            if job_request.digest() != clip.request_digest or job_request != request:
+                raise RuntimeError("Video chain Job request does not match its clip snapshot")
+            if job.input_asset_ids != request_input_asset_ids(request):
+                raise RuntimeError("Video chain Job inputs do not match its request snapshot")
+            provider = configured_first_last_frame_provider(
+                get_settings().provider_config,
+                request.provider_id,
+            )
+            output = await VideoChainPipeline(
+                db,
+                provider=provider,
+                cancel_requested=cancellation_requested,
+                progress=report_progress,
+            ).run(project, clip)
+            output_asset_id = output.id
         else:
             raise RuntimeError(f"Unsupported job type: {job.job_type}")
         completion = mark_succeeded(db, job, [output_asset_id])
@@ -280,6 +321,7 @@ async def _process_claimed_job(
         )
     except (PipelineCancelled, MediaCancelled):
         db.rollback()
+        _mark_chain_clip_terminal(db, job, cancelled=True)
         state = mark_cancelled(db, job)
         if state is JobState.CANCELLED:
             _append_job_log_safely(log_path, "job_cancelled", job_id=job.id)
@@ -298,9 +340,22 @@ async def _process_claimed_job(
         }
         if isinstance(error, ProviderExecutionError):
             error_info["provider_error"] = error.to_safe_dict()
-        state = mark_failed(db, job, error_info)
-        if state is JobState.CANCEL_REQUESTED:
+        provider_cancelled = (
+            isinstance(error, ProviderExecutionError)
+            and error.failure_kind is ProviderFailureKind.CANCELLED
+        )
+        _mark_chain_clip_terminal(
+            db,
+            job,
+            cancelled=provider_cancelled,
+            error_info=error_info,
+        )
+        if provider_cancelled:
             state = mark_cancelled(db, job)
+        else:
+            state = mark_failed(db, job, error_info)
+            if state is JobState.CANCEL_REQUESTED:
+                state = mark_cancelled(db, job)
         if state is JobState.CANCELLED:
             _append_job_log_safely(
                 log_path,
@@ -338,6 +393,34 @@ def _append_job_log_safely(log_path: Path | None, event: str, **data: Any) -> No
             path=str(log_path),
             error_type=type(error).__name__,
         )
+
+
+def _mark_chain_clip_terminal(
+    db: Session,
+    job: Job,
+    *,
+    cancelled: bool,
+    error_info: dict[str, object] | None = None,
+) -> None:
+    if job.job_type != "video_chain_clip_generation":
+        return
+    clip_id = (job.payload or {}).get(CHAIN_CLIP_ID_KEY)
+    if not isinstance(clip_id, str):
+        return
+    from flipthis_video_maker.contracts.video_generation import ChainClipState
+    from flipthis_video_maker.domain.models import VideoChainClip
+
+    clip = db.get(VideoChainClip, clip_id)
+    if clip is None:
+        return
+    clip.state = ChainClipState.CANCELLED.value if cancelled else ChainClipState.FAILED.value
+    clip.failure_info = error_info or {}
+    provider_error = (error_info or {}).get("provider_error")
+    if isinstance(provider_error, dict):
+        provider_job_id = provider_error.get("provider_job_id")
+        if isinstance(provider_job_id, str):
+            clip.provider_job_id = provider_job_id
+    db.commit()
 
 
 def _resolve_render_profile_execution(

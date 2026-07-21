@@ -1,7 +1,7 @@
 import json
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,23 @@ class MediaCancelled(MediaError):
     pass
 
 
+class MediaCommandError(MediaError):
+    """Typed child-process failure; adapters may classify configured exit codes."""
+
+    def __init__(
+        self,
+        args: list[str],
+        return_code: int,
+        stdout: str,
+        stderr: str,
+    ) -> None:
+        self.args_list = list(args)
+        self.return_code = return_code
+        self.stdout = stdout
+        self.stderr = stderr
+        super().__init__(f"Command failed ({return_code}): {' '.join(args[:3])}\n{stderr[-2000:]}")
+
+
 CancelCheck = Callable[[], bool]
 
 
@@ -26,6 +43,8 @@ def run(
     cancel_requested: CancelCheck | None = None,
     poll_interval: float = 0.1,
     terminate_grace_seconds: float = 2,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run one media command while retaining ownership of its process lifecycle."""
     if timeout <= 0:
@@ -35,7 +54,14 @@ def run(
     if cancel_requested and cancel_requested():
         raise MediaCancelled(f"Command cancelled before start: {' '.join(args[:3])}")
 
-    process = subprocess.Popen(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(
+        args,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+        env=env,
+    )
     started = time.monotonic()
     try:
         while True:
@@ -61,8 +87,11 @@ def run(
 
     result = subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
     if result.returncode:
-        raise MediaError(
-            f"Command failed ({result.returncode}): {' '.join(args[:3])}\n{result.stderr[-2000:]}"
+        raise MediaCommandError(
+            args,
+            result.returncode,
+            result.stdout,
+            result.stderr,
         )
     return result
 

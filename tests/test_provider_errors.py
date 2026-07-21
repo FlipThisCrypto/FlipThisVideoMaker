@@ -47,6 +47,20 @@ def test_out_of_memory_error_has_a_typed_retryable_classification() -> None:
     assert error.to_safe_dict()["failure_kind"] == "out_of_memory"
 
 
+def test_provider_error_includes_async_metadata_only_when_supplied() -> None:
+    error = ProviderExecutionError(
+        provider_id="hosted-video",
+        operation="poll_generation",
+        failure_kind=ProviderFailureKind.RATE_LIMITED,
+        retryable=True,
+        provider_job_id="generation-123",
+        retry_after_seconds=2.5,
+    )
+
+    assert error.to_safe_dict()["provider_job_id"] == "generation-123"
+    assert error.to_safe_dict()["retry_after_seconds"] == 2.5
+
+
 def test_cleanup_result_is_frozen_and_cannot_mark_incomplete_cleanup_retry_safe() -> None:
     result = ProviderCleanupResult(
         provider_id="local-video",

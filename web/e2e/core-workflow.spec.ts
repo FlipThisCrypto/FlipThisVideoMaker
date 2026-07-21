@@ -21,6 +21,42 @@ test("creates, plans, renders, and regenerates a local mock project", async ({
   await expect(character).toContainText("mock-tone-v1");
 
   await page.goto(projectUrl);
+  await page.getByRole("link", { name: "Continuous video chains" }).click();
+  await page.getByLabel("New chain name").fill("E2E continuous chain");
+  await page.getByRole("button", { name: "Create video chain" }).click();
+  await expect(page.getByRole("heading", { name: "E2E continuous chain" })).toBeVisible();
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const frameUploads = page.locator(
+    'input[type="file"][accept="image/png,image/jpeg"]',
+  );
+  await frameUploads.nth(0).setInputFiles({
+    name: "start.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  await frameUploads.nth(1).setInputFiles({
+    name: "target.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  await page
+    .getByLabel("Continuous motion and scene prompt")
+    .fill("A performer walks naturally while the camera tracks toward the target frame.");
+  await expect(page.getByText(/10.000 seconds · constant 60 fps · 600 frames/)).toBeVisible();
+  await expect(page.getByText(/disabled or its credential is missing/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Generate true continuous-motion clip" }),
+  ).toBeDisabled();
+  await page
+    .getByLabel("Speaking-shot eligibility")
+    .selectOption("speaking_face_visible");
+  await expect(page.getByLabel("Dialogue audio Asset")).toBeVisible();
+  await expect(page.getByText(/LatentSync 1.5 runtime or weights are unavailable/)).toBeVisible();
+
+  await page.goto(projectUrl);
   await page
     .getByLabel("Story text")
     .fill(

@@ -134,6 +134,8 @@ export interface Job {
   completed_at: string | null;
   render_profile_execution: RenderProfileExecution | null;
   render_profile_execution_error: string | null;
+  first_last_frame_generation: FirstLastFrameGenerationRequest | null;
+  first_last_frame_generation_error: string | null;
 }
 export interface WorkerStatus {
   id: string;
@@ -221,6 +223,127 @@ export interface Asset {
   source_provider?: string;
   generation_parameters?: Record<string, unknown>;
   created_at?: string;
+}
+
+export type GenerationCategory =
+  | "mock_test_video"
+  | "still_image_animation"
+  | "frame_interpolation"
+  | "first_frame_image_to_video"
+  | "first_last_frame_generative_video"
+  | "performance_conditioned_video"
+  | "frame_rate_conversion";
+
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  model_identity: string;
+  capabilities: string[];
+  available: boolean;
+  supported_inputs: string[];
+  max_duration_seconds: number | null;
+  max_width: number | null;
+  max_height: number | null;
+  native_frame_rates: number[];
+  supported_durations_seconds: number[];
+  generation_category: GenerationCategory | null;
+  cancellation_supported: boolean;
+  progress_supported: boolean;
+  notes: string;
+}
+
+export interface ProviderHealth {
+  provider: string;
+  ok: boolean;
+  status?: string;
+  api_version?: string | null;
+  [key: string]: unknown;
+}
+
+export interface FirstLastFrameGenerationRequest {
+  version: 1;
+  generation_category: "first_last_frame_generative_video";
+  provider_id: string;
+  provider_model: string;
+  provider_version: string | null;
+  start_frame_asset_id: string;
+  target_end_frame_asset_id: string;
+  prompt: string;
+  negative_prompt: string;
+  duration_seconds: number;
+  native_requested_fps: number;
+  delivery_fps: number;
+  width: number;
+  height: number;
+  aspect_ratio: string;
+  seed: number | null;
+  motion_strength: number | null;
+  camera_direction: string;
+  identity_reference_asset_ids: string[];
+  audio_reference_asset_id: string | null;
+  lip_sync_mode: string;
+  lip_sync_provider_id: string | null;
+  lip_sync_settings: {
+    eligibility: string;
+    speaker_label: string | null;
+    face_index: number | null;
+  };
+  interpolation_mode: string;
+  interpolation_provider_id: string | null;
+  safety: Record<string, unknown>;
+  provider_settings: Record<string, Record<string, unknown>>;
+  captured_render_profile: Record<string, unknown>;
+  captured_fallback_policy: Record<string, unknown>;
+  retry_continuation: {
+    attempt: number;
+    continuation_mode: string;
+    predecessor_clip_id: string | null;
+    retry_of_job_id: string | null;
+  };
+}
+
+export interface VideoChain {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  continuation_mode: string;
+  state: string;
+  active_lineage_version: number;
+  buffer_target_seconds: number;
+  playlist_asset_id: string | null;
+  assembled_asset_id: string | null;
+  stream_state: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VideoChainClip {
+  id: string;
+  chain_id: string;
+  sequence_number: number;
+  revision: number;
+  lineage_version: number;
+  predecessor_clip_id: string | null;
+  planned_start_frame_asset_id: string;
+  target_end_frame_asset_id: string;
+  actual_start_frame_asset_id: string | null;
+  actual_last_frame_asset_id: string | null;
+  native_video_asset_id: string | null;
+  delivery_video_asset_id: string | null;
+  qa_report_asset_id: string | null;
+  job_id: string | null;
+  state: string;
+  request_snapshot: FirstLastFrameGenerationRequest;
+  request_digest: string;
+  result_snapshot: Record<string, unknown>;
+  provider_job_id: string | null;
+  provider_warnings: string[];
+  failure_info: Record<string, unknown>;
+  accepted_at: string | null;
+  rejected_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 export interface Candidate {
   id: string;

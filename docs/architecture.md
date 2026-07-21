@@ -45,10 +45,39 @@ state, and terminates then kills/reaps a process when required. Validated inputs
 state are committed before long media work so SQLite does not block cancellation writes. Job
 completion and cancellation use conditional database transitions so only one terminal path wins.
 
+## First/last-frame generative chain flow
+
+`VideoChain → immutable FLF request → hosted category-5 native video Asset → optional LatentSync
+performance Asset → RIFE interpolation Asset → exact CFR delivery Asset → decoded actual boundary
+Assets + QA → review → accepted successor → shared-boundary assembly/HLS`
+
+Generation method is part of capability discovery and provenance. Mock/test video, still animation,
+frame interpolation, first-frame-only I2V, first-and-last-frame generative video,
+performance-conditioned video, and final frame-rate conversion are distinct categories. Only the
+first-and-last-frame generative category satisfies the primary generation requirement.
+
+Every chain clip stores planned start and target Assets separately from decoded actual start/end
+Assets. Its request and fallback/profile envelopes are immutable and digest-checked. A successor
+can be created only from an accepted predecessor's actual decoded last frame, and a database
+uniqueness constraint prevents conflicting successors within one lineage. A failed clip can resume
+from its persisted provider-native and lip-sync stages. Regeneration from an earlier accepted point
+increments the lineage instead of destroying prior work.
+
+Provider-native output is never called 60-fps generation unless ffprobe proves that native fact.
+Practical-RIFE produces temporal intermediates; FFmpeg then encodes a constant 60-fps/600-frame
+delivery and extracts the inspected frames. Boundary metrics, duplicate/freeze evidence, contact
+sheet, report, and actual boundary Assets are persisted. Outputs that fail any production check are
+degraded and cannot be accepted.
+
+Accepted contiguous clips can be published as an HLS EVENT playlist. Segment and playlist files are
+written atomically; successor segment frame 0 is trimmed to avoid the shared boundary duplicate.
+Buffer state reports observed generation time and whether it keeps up. Exhaustion pauses/rebuffers;
+the system does not call a finite playlist literally infinite.
+
 ## Current execution status
 
-The deterministic CPU mock path, immutable render-profile execution, typed fallback fixture, worker
-heartbeat lifecycle, active media cancellation, and per-physical-GPU admission logic are implemented
-and exercised. External model adapters are only prepared/configurable unless a document explicitly
-says a real backend was exercised. Two RTX 4070 devices are discoverable and their worker processes
-have been started independently, but no model backend or CUDA generation workload has been exercised.
+The deterministic CPU mock path and deterministic two-clip category-5 orchestration fixture are
+exercised. LTX-2.3 Pro, Luma Ray 3.2, Practical-RIFE 4.25, and LatentSync 1.5 adapters are implemented
+with protocol/argv fixtures but unexercised against their real services/runtimes. Two RTX 4070
+devices are discoverable and their worker processes have been started independently, but no CUDA
+generation, interpolation, or lip-sync workload has been exercised.

@@ -13,9 +13,13 @@ after that provider reports completed retry-safe cleanup. This automatic retry s
 current Job attempt and physical-GPU lock. Requested/effective history survives restart and manual
 retry.
 
-The current mock path keeps the planned shot duration; it does not yet derive speaking duration from
-measured audio. Conditional lip-sync rules (skip narration, off-camera/hidden mouths, and integrated
-audio-driven motion) remain pipeline design requirements rather than exercised orchestration.
-External provider work is intended to be admitted by capability, not provider name. A failed Job
-retains completed Assets; retry creates a new attempt. Per-shot regeneration creates an unselected
-Candidate until the user promotes it.
+The separate chain pipeline consumes an immutable category-5 first/last request, preserves hosted
+native output, optionally creates a 25-fps RIFE/LatentSync performance output, creates a 60-fps RIFE
+intermediate, encodes and measures the exact delivery, extracts actual boundaries, and waits for
+review. A failed Job retains completed stage Assets and resumes from checksummed lineage after retry.
+
+Standard dialogue clips require measured audio within 100 ms of the fixed 10-second contract.
+Conditional lip-sync rules explicitly skip narration/no visible speaker, hidden mouths, multiple
+faces, no speech, and manual skip. One visible speaking face may use LatentSync; SyncNet and boundary
+QA determine whether it is reviewable or degraded. External generation is admitted by truthful
+capability and authenticated health, with model-specific payloads confined to adapters.

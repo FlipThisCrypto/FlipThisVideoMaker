@@ -10,6 +10,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from flipthis_video_maker.config.settings import get_settings
+from flipthis_video_maker.contracts.video_generation import GenerationCategory
 from flipthis_video_maker.media.ffmpeg import MediaCancelled, run
 from flipthis_video_maker.providers.base.models import (
     Capability,
@@ -104,14 +105,19 @@ class MockVideoProvider:
     def info(self) -> ProviderInfo:
         return ProviderInfo(
             id="mock-video",
-            name="Deterministic Mock FLF Video",
+            name="Deterministic mock still-frame transition",
             model_identity="ffmpeg-xfade-v1",
-            capabilities={Capability.VIDEO_GENERATION, Capability.FIRST_LAST_FRAME_VIDEO},
+            capabilities={Capability.MEDIA_RENDERING, Capability.FIRST_LAST_FRAME_VIDEO},
             available=True,
             supported_inputs={"first_frame", "last_frame", "audio"},
             max_duration_seconds=60,
             max_width=1920,
             max_height=1080,
+            generation_category=GenerationCategory.MOCK_TEST_VIDEO,
+            notes=(
+                "CPU test fixture only: FFmpeg crossfades two still images. This is not "
+                "generative motion and cannot satisfy the FLF production contract."
+            ),
         )
 
     async def health(self) -> dict[str, object]:
@@ -223,6 +229,8 @@ class MockInterpolationProvider:
             capabilities={Capability.INTERPOLATION},
             available=True,
             supported_inputs={"video"},
+            generation_category=GenerationCategory.FRAME_INTERPOLATION,
+            notes="Test passthrough only; it does not create intermediate frames.",
         )
 
     async def health(self) -> dict[str, object]:

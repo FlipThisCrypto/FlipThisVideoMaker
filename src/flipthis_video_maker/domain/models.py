@@ -2,7 +2,17 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from flipthis_video_maker.database.session import Base
@@ -44,6 +54,7 @@ class Project(Base, TimestampMixin):
     scenes: Mapped[list["Scene"]] = relationship(
         cascade="all, delete-orphan", order_by="Scene.number"
     )
+    video_chains: Mapped[list["VideoChain"]] = relationship(cascade="all, delete-orphan")
 
 
 class Character(Base, TimestampMixin):
@@ -245,3 +256,91 @@ class Render(Base, TimestampMixin):
     audio_configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     subtitle_configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     creation_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class VideoChain(Base, TimestampMixin):
+    __tablename__ = "video_chains"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    continuation_mode: Mapped[str] = mapped_column(String(40), default="planned_target")
+    state: Mapped[str] = mapped_column(String(30), default="draft", index=True)
+    active_lineage_version: Mapped[int] = mapped_column(Integer, default=1)
+    buffer_target_seconds: Mapped[float] = mapped_column(Float, default=30)
+    playlist_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="SET NULL")
+    )
+    assembled_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="SET NULL")
+    )
+    stream_state: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    clips: Mapped[list["VideoChainClip"]] = relationship(
+        cascade="all, delete-orphan",
+        order_by="VideoChainClip.sequence_number, VideoChainClip.revision",
+        foreign_keys="VideoChainClip.chain_id",
+    )
+
+
+class VideoChainClip(Base, TimestampMixin):
+    __tablename__ = "video_chain_clips"
+    __table_args__ = (
+        UniqueConstraint(
+            "chain_id",
+            "lineage_version",
+            "sequence_number",
+            "revision",
+            name="uq_chain_clip_position_revision",
+        ),
+        UniqueConstraint(
+            "predecessor_clip_id",
+            "lineage_version",
+            name="uq_chain_clip_successor_per_lineage",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    chain_id: Mapped[str] = mapped_column(
+        ForeignKey("video_chains.id", ondelete="CASCADE"), index=True
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    lineage_version: Mapped[int] = mapped_column(Integer, default=1)
+    predecessor_clip_id: Mapped[str | None] = mapped_column(
+        ForeignKey("video_chain_clips.id", ondelete="RESTRICT"), index=True
+    )
+    planned_start_frame_asset_id: Mapped[str] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT")
+    )
+    target_end_frame_asset_id: Mapped[str] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT")
+    )
+    actual_start_frame_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT")
+    )
+    actual_last_frame_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT")
+    )
+    native_video_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT")
+    )
+    delivery_video_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT")
+    )
+    qa_report_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="RESTRICT")
+    )
+    job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL"), unique=True
+    )
+    state: Mapped[str] = mapped_column(String(30), default="planned", index=True)
+    request_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
+    request_digest: Mapped[str] = mapped_column(String(64))
+    result_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    provider_job_id: Mapped[str | None] = mapped_column(String(200))
+    provider_warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+    failure_info: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

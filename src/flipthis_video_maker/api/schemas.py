@@ -1,7 +1,15 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AliasPath, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    ValidationError,
+    field_validator,
+)
 
 from flipthis_video_maker.config.render_finalization import (
     RENDER_FINALIZATION_EXECUTION_KEY,
@@ -12,6 +20,15 @@ from flipthis_video_maker.config.render_profiles import (
     RENDER_PROFILE_EXECUTION_KEY,
     RenderProfileExecution,
 )
+from flipthis_video_maker.contracts.video_generation import (
+    ContinuationMode,
+    FirstLastFrameGenerationRequest,
+    InterpolationMode,
+    LipSyncMode,
+    LipSyncSettings,
+    SafetySettings,
+)
+from flipthis_video_maker.services.video_chains import FLF_REQUEST_KEY
 
 
 class ORMModel(BaseModel):
@@ -55,6 +72,91 @@ class ProjectRenderRequest(BaseModel):
 
     render_profile: str | None = Field(default=None, min_length=1, max_length=40)
     finalization: RenderFinalizationRequest = Field(default_factory=RenderFinalizationRequest)
+
+
+class VideoChainCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=4000)
+    continuation_mode: ContinuationMode = ContinuationMode.PLANNED_TARGET
+    buffer_target_seconds: float = Field(default=30, ge=10, le=3600)
+
+
+class VideoChainRead(ORMModel):
+    id: str
+    project_id: str
+    name: str
+    description: str
+    continuation_mode: str
+    state: str
+    active_lineage_version: int
+    buffer_target_seconds: float
+    playlist_asset_id: str | None
+    assembled_asset_id: str | None
+    stream_state: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class VideoChainClipCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    predecessor_clip_id: str | None = Field(default=None, min_length=1, max_length=36)
+    regenerate_from_predecessor: bool = False
+    provider_id: str = Field(default="ltx-video-pro", min_length=1, max_length=120)
+    provider_model: str = Field(default="ltx-2-3-pro", min_length=1, max_length=160)
+    start_frame_asset_id: str = Field(min_length=1, max_length=36)
+    target_end_frame_asset_id: str = Field(min_length=1, max_length=36)
+    prompt: str = Field(min_length=1, max_length=6000)
+    negative_prompt: str = Field(default="", max_length=6000)
+    duration_seconds: Literal[10] = 10
+    native_requested_fps: Literal[24] = 24
+    delivery_fps: Literal[60] = 60
+    render_profile: str = Field(default="standard", min_length=1, max_length=40)
+    seed: int | None = Field(default=None, ge=0, le=4_294_967_295)
+    motion_strength: float | None = Field(default=None, ge=0, le=1)
+    camera_direction: str = Field(default="natural", min_length=1, max_length=500)
+    identity_reference_asset_ids: tuple[str, ...] = ()
+    audio_reference_asset_id: str | None = Field(default=None, min_length=1, max_length=36)
+    lip_sync_mode: LipSyncMode = LipSyncMode.SKIP
+    lip_sync_provider_id: str | None = Field(default=None, min_length=1, max_length=120)
+    lip_sync_settings: LipSyncSettings = Field(default_factory=LipSyncSettings)
+    interpolation_mode: InterpolationMode = InterpolationMode.RIFE
+    interpolation_provider_id: str | None = Field(default="rife-local", max_length=120)
+    safety: SafetySettings = Field(default_factory=SafetySettings)
+    provider_settings: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
+    fallback_provider_ids: tuple[str, ...] = ()
+    maximum_attempts: int | None = Field(default=None, ge=1, le=10)
+    gpu_assignment: Literal["gpu0", "gpu1"] = "gpu0"
+
+
+class VideoChainClipRead(ORMModel):
+    id: str
+    chain_id: str
+    sequence_number: int
+    revision: int
+    lineage_version: int
+    predecessor_clip_id: str | None
+    planned_start_frame_asset_id: str
+    target_end_frame_asset_id: str
+    actual_start_frame_asset_id: str | None
+    actual_last_frame_asset_id: str | None
+    native_video_asset_id: str | None
+    delivery_video_asset_id: str | None
+    qa_report_asset_id: str | None
+    job_id: str | None
+    state: str
+    request_snapshot: dict[str, Any]
+    request_digest: str
+    result_snapshot: dict[str, Any]
+    provider_job_id: str | None
+    provider_warnings: list[str]
+    failure_info: dict[str, Any]
+    accepted_at: datetime | None
+    rejected_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class RenderProfileRead(BaseModel):
@@ -331,6 +433,14 @@ class JobRead(ORMModel):
         default=None,
         validation_alias=AliasPath("payload", RENDER_FINALIZATION_EXECUTION_KEY),
     )
+    first_last_frame_generation: FirstLastFrameGenerationRequest | None = Field(
+        default=None,
+        validation_alias=AliasPath("payload", FLF_REQUEST_KEY),
+    )
+    first_last_frame_generation_error: str | None = Field(
+        default=None,
+        validation_alias=AliasPath("payload", FLF_REQUEST_KEY),
+    )
 
     @field_validator("render_profile_execution", mode="before")
     @classmethod
@@ -372,6 +482,29 @@ class JobRead(ORMModel):
             return None
         try:
             RenderFinalizationExecution.model_validate(value)
+        except ValidationError:
+            return "invalid_snapshot"
+        return None
+
+    @field_validator("first_last_frame_generation", mode="before")
+    @classmethod
+    def tolerate_invalid_flf_generation(
+        cls, value: object
+    ) -> FirstLastFrameGenerationRequest | None:
+        if value is None:
+            return None
+        try:
+            return FirstLastFrameGenerationRequest.model_validate(value)
+        except ValidationError:
+            return None
+
+    @field_validator("first_last_frame_generation_error", mode="before")
+    @classmethod
+    def report_invalid_flf_generation(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        try:
+            FirstLastFrameGenerationRequest.model_validate(value)
         except ValidationError:
             return "invalid_snapshot"
         return None

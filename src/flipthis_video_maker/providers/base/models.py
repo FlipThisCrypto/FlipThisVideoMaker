@@ -13,6 +13,7 @@ class Capability(StrEnum):
     VOICE_CLONING = "voice_cloning"
     VIDEO_GENERATION = "video_generation"
     FIRST_LAST_FRAME_VIDEO = "first_last_frame_video"
+    FIRST_LAST_FRAME_GENERATIVE_VIDEO = "first_last_frame_generative_video"
     AUDIO_DRIVEN_AVATAR = "audio_driven_avatar"
     LIP_SYNC = "lip_sync"
     INTERPOLATION = "frame_interpolation"
@@ -32,6 +33,11 @@ class ProviderInfo(BaseModel):
     max_duration_seconds: float | None = None
     max_width: int | None = None
     max_height: int | None = None
+    native_frame_rates: set[int] = Field(default_factory=set)
+    supported_durations_seconds: set[float] = Field(default_factory=set)
+    generation_category: str | None = None
+    cancellation_supported: bool = False
+    progress_supported: bool = False
     notes: str = ""
 
 

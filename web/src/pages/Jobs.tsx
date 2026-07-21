@@ -45,6 +45,26 @@ export function Jobs() {
                 until it is replaced or repaired.
               </p>
             )}
+            {job.first_last_frame_generation && (
+              <div className="mt-3 rounded border border-slate-700 p-3 text-sm">
+                <p className="font-semibold">True first/last-frame generation</p>
+                <p className="text-slate-300">
+                  {job.first_last_frame_generation.provider_id} /{" "}
+                  {job.first_last_frame_generation.provider_model} ·{" "}
+                  {job.first_last_frame_generation.duration_seconds}s ·{" "}
+                  {job.first_last_frame_generation.native_requested_fps} fps native request →{" "}
+                  {job.first_last_frame_generation.delivery_fps} fps delivery
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Local cancellation cannot stop a provider that reports no remote cancellation support.
+                </p>
+              </div>
+            )}
+            {job.first_last_frame_generation_error && (
+              <p className="mt-2 text-sm text-red-300" role="alert">
+                This Job has an invalid first/last-frame request snapshot and cannot run.
+              </p>
+            )}
             <div className="mt-3 flex gap-2">
               {job.log_path && (
                 <a className="button" href={`/api/v1/jobs/${job.id}/log`}>

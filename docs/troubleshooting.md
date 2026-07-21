@@ -38,3 +38,31 @@ proxy errors during an intentional API restart.
 GPU discovery returns an empty list when `nvidia-smi` is absent or fails. The mock milestone is fully
 CPU-only. A configured GPU worker can start for lifecycle diagnostics, but it will not claim GPU jobs
 until its exact physical device passes admission. This does not prove CUDA or model execution.
+
+## Generative provider is unavailable
+
+Discovery is not health. Enable exactly one `ltx` or `luma` entry in `config/providers.yaml`, set its
+named environment credential, restart the API, and inspect `/api/v1/providers/health`. LTX requires
+the 1080p `final` profile. A missing/invalid credential, disabled provider, or failed authenticated
+probe deliberately prevents enqueue. Never paste a key into YAML, the UI, a Job payload, or logs.
+
+## RIFE or LatentSync is unavailable
+
+Both are external administrator-managed environments. Verify every configured path exists and that
+the model/checkpoint directory is populated. RIFE must use the official `inference_video.py` and
+4.25 model directory. LatentSync requires its repository, Python runtime, 1.5 UNet config/checkpoint,
+and official SyncNet checkpoint. The adapters inherit the worker's `CUDA_VISIBLE_DEVICES`; do not
+combine two 12 GB cards or add undocumented device flags.
+
+## A chain clip is degraded
+
+Open its immutable QA/provenance details. A clip is degraded for any failed duration, CFR, 600-frame,
+start/end boundary, last-frame snap, duplicate-freeze, audio-presence, or lip-sync check. Degraded
+clips cannot be accepted. Regenerate with stronger provider-native boundary conditioning or a better
+prompt/target. Do not replace frame 599 or add a crossfade to force a pass.
+
+## Hosted cancellation did not stop billing
+
+The reviewed LTX V2 and Luma Agents contracts do not document a server-side cancellation endpoint.
+Cancellation stops local polling/download, records the provider Job ID, and prevents publication, but
+the hosted job may continue. Check the provider console before retrying to avoid duplicate spend.

@@ -11,6 +11,7 @@ import { ProjectEditor } from "./pages/ProjectEditor";
 import { Jobs } from "./pages/Jobs";
 import { Providers } from "./pages/Providers";
 import { Renders } from "./pages/Renders";
+import { VideoChains } from "./pages/VideoChains";
 import "./index.css";
 const router = createBrowserRouter([
   {
@@ -21,6 +22,7 @@ const router = createBrowserRouter([
       { path: "projects", element: <Projects /> },
       { path: "projects/:id", element: <ProjectEditor /> },
       { path: "projects/:id/characters", element: <Characters /> },
+      { path: "projects/:id/video-chains", element: <VideoChains /> },
       { path: "jobs", element: <Jobs /> },
       { path: "providers", element: <Providers /> },
       { path: "renders", element: <Renders /> },

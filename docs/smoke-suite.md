@@ -1,8 +1,8 @@
 # Smoke Suite: FlipThisVideoMaker Mock Vertical Slice
 
-**Run after:** every backend, media, schema, or worker change.  
-**Expected runtime:** under two minutes on a typical development CPU.  
-**Required data state:** none; every command creates isolated local data.  
+**Run after:** every backend, media, schema, or worker change.
+**Expected runtime:** under two minutes on a typical development CPU.
+**Required data state:** none; every command creates isolated local data.
 **Stop rule:** if P1 fails, halt and mark P2–P5 `NOT RUN`. Record the exact command,
 expected result, observed result, and stderr; diagnose before changing code.
 
@@ -12,8 +12,8 @@ expected result, observed result, and stderr; diagnose before changing code.
 
 - Setup: create a new temporary directory and point `FTVM_DATABASE_URL` at a nonexistent SQLite file.
 - Action: run `uv run alembic upgrade head`.
-- Expect: exit code `0` and the SQLite file exists at the current documented Alembic head (`0003` as
-  of 2026-07-12).
+- Expect: exit code `0` and the SQLite file exists at the current documented Alembic head (`0004` as
+  of 2026-07-20).
 
 ### P2 — Backend static and unit validation (source: entry/core execution)
 
@@ -38,6 +38,15 @@ expected result, observed result, and stderr; diagnose before changing code.
 - Setup: dependencies and FFmpeg are available.
 - Action: run `uv run pytest tests/test_mock_pipeline.py`.
 - Expect: exit code `0`; the test reports one pass after two distinct renders of one project.
+
+### P6 — First/last-frame chain delivery contract [FOUNDATIONAL]
+
+- Setup: FFmpeg and ffprobe are on `PATH`; no hosted credential or GPU runtime is required.
+- Action: run `uv run pytest tests/test_video_chain_pipeline.py`.
+- Expect: deterministic fixtures produce two exact 10-second/60-fps/600-frame clips, persist the
+  first clip's decoded actual frame 599 as the second start Asset, assemble exactly 1,199 frames,
+  publish 600/599-frame HLS segments, preserve restartable native output, and exercise optional
+  lip-sync lineage/audio/QA without claiming real generative quality.
 
 ## Intake rules
 

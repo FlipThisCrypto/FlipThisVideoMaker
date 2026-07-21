@@ -9,6 +9,14 @@ class ProviderFailureKind(StrEnum):
 
     EXECUTION_FAILED = "execution_failed"
     OUT_OF_MEMORY = "out_of_memory"
+    AUTHENTICATION = "authentication"
+    RATE_LIMITED = "rate_limited"
+    CONTENT_MODERATED = "content_moderated"
+    INVALID_INPUT = "invalid_input"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+    OUTPUT_INVALID = "output_invalid"
 
 
 class ProviderExecutionError(RuntimeError):
@@ -22,27 +30,38 @@ class ProviderExecutionError(RuntimeError):
         failure_kind: ProviderFailureKind = ProviderFailureKind.EXECUTION_FAILED,
         retryable: bool = False,
         backend_code: str | None = None,
+        provider_job_id: str | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         self.provider_id = _required_value("provider_id", provider_id)
         self.operation = _required_value("operation", operation)
         self.failure_kind = failure_kind
         self.retryable = retryable
         self.backend_code = _optional_value("backend_code", backend_code)
+        self.provider_job_id = _optional_value("provider_job_id", provider_job_id)
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(
             f"Provider {self.provider_id!r} failed during {self.operation!r} "
             f"({self.failure_kind.value})"
         )
 
-    def to_safe_dict(self) -> dict[str, str | bool | None]:
+    def to_safe_dict(self) -> dict[str, str | bool | float | None]:
         """Return fields safe for core persistence and structured job logs."""
 
-        return {
+        result: dict[str, str | bool | float | None] = {
             "provider_id": self.provider_id,
             "operation": self.operation,
             "failure_kind": self.failure_kind.value,
             "retryable": self.retryable,
             "backend_code": self.backend_code,
         }
+        # Preserve the original stable error shape unless the asynchronous
+        # provider supplied these newer optional fields.
+        if self.provider_job_id is not None:
+            result["provider_job_id"] = self.provider_job_id
+        if self.retry_after_seconds is not None:
+            result["retry_after_seconds"] = self.retry_after_seconds
+        return result
 
 
 class ProviderOutOfMemoryError(ProviderExecutionError):

@@ -9,6 +9,46 @@ providers:
   - id: mock-video
     kind: mock
     enabled: true
+  - id: luma-ray
+    kind: luma
+    enabled: false
+    endpoint: https://agents.lumalabs.ai/v1
+    model: ray-3.2
+    api_key_env: LUMA_AGENTS_API_KEY
+    timeout_seconds: 900
+    poll_interval_seconds: 2
+    max_download_mb: 2048
+    max_inline_image_mb: 20
+  - id: ltx-video-pro
+    kind: ltx
+    enabled: false
+    endpoint: https://api.ltx.video
+    model: ltx-2-3-pro
+    api_key_env: LTXV_API_KEY
+    timeout_seconds: 900
+    poll_interval_seconds: 5
+    max_download_mb: 2048
+    max_inline_image_mb: 7
+  - id: rife-local
+    kind: rife
+    enabled: false
+    python: /opt/practical-rife/.venv/bin/python
+    script: /opt/practical-rife/inference_video.py
+    model_directory: /opt/practical-rife/train_log
+    timeout_seconds: 1800
+  - id: latentsync-local
+    kind: latentsync
+    enabled: false
+    model: LatentSync-1.5
+    python: /opt/latentsync/.venv/bin/python
+    repository_directory: /opt/latentsync
+    unet_config_path: /opt/latentsync/configs/unet/stage2.yaml
+    checkpoint_path: /opt/latentsync/checkpoints/latentsync_unet.pt
+    syncnet_checkpoint_path: /opt/latentsync/checkpoints/auxiliary/syncnet_v2.model
+    inference_steps: 20
+    guidance_scale: 1.5
+    enable_deepcache: true
+    timeout_seconds: 1800
   - id: comfyui-local
     kind: comfyui
     enabled: false

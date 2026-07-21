@@ -4,8 +4,11 @@ Start with the documents in this order when resuming implementation:
 
 1. [Current status](current-status.md) — exact exercised, implemented, prepared, and planned state.
 2. [Architecture](architecture.md) — runtime boundaries and the current mock render flow.
-3. [Roadmap](roadmap.md) — next execution order and explicitly unfulfilled production targets.
-4. [Development](development.md) — local toolchain, migrations, generated data, and commit gates.
+3. [Generative video workflow](generative-video-workflow.md) — exact chain, delivery, lip-sync, and recovery workflow.
+4. [Provider decision](provider-decision.md) — current primary-source comparison and selected stack.
+5. [Roadmap](roadmap.md) — next execution order and explicitly unfulfilled production targets.
+6. [Adversarial review](adversarial-review.md) — final failure-hypothesis review and dispositions.
+7. [Development](development.md) — local toolchain, migrations, generated data, and commit gates.
 
 ## Install and operate
 
@@ -49,6 +52,7 @@ Start with the documents in this order when resuming implementation:
 - [0007 — Snapshot render profiles and provider-owned OOM](adr/0007-snapshot-render-profiles-and-provider-owned-oom.md)
 - [0008 — Persist completed post-processing stages](adr/0008-persist-completed-postprocessing-stages.md)
 - [0009 — Snapshot final-render execution inputs](adr/0009-snapshot-finalization-execution.md)
+- [0010 — First/last-frame generative video stack](adr/0010-first-last-generative-video-stack.md)
 
 `docs/current-status.md` is the authoritative handoff record. Update it and this map whenever a phase
 adds, removes, or renames a durable capability or document.

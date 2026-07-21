@@ -167,6 +167,9 @@ export function ProjectEditor() {
         <Link className="button" to={`/projects/${id}/characters`}>
           Characters & voices
         </Link>
+        <Link className="button" to={`/projects/${id}/video-chains`}>
+          Continuous video chains
+        </Link>
       </div>
       {profileCatalog.isError && (
         <p className="card mb-6 text-red-300" role="alert">

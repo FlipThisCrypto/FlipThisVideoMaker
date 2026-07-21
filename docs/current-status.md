@@ -1,226 +1,191 @@
 # FlipThisVideoMaker Current Status
 
 **Status date:** 2026-07-20
+
 **Repository:** `FlipThisCrypto/FlipThisVideoMaker`
-**Truthful status:** the deterministic CPU mock vertical slice, resumable post-processing stages,
-advanced media QA, browser workflow, cancellation, heartbeat, and GPU-admission reliability boundary
-are exercised. Live model production remains incomplete and unexercised. This file is the durable
-handoff point; resume from the final sections rather than relying on chat history.
 
-## Durable stopping point
+**Branch:** `codex/flf-generative-video`
 
-The final-media phase in ADR 0009 is implemented and exercised. Project render Jobs capture a
-versioned immutable finalization snapshot; background music is selected by project-owned Asset ID and
-revalidated before execution; completed assembly, audio, and subtitle stages retain immutable Asset
-provenance; and the React render form exposes subtitle, loudness, and music controls. Sidecar remains
-the compatibility default.
+**Truthful status:** a complete provider-neutral first/last-frame chain vertical slice is implemented
+and exercised with deterministic CPU protocol/integration fixtures. LTX-2.3 Pro, Luma Ray 3.2,
+Practical-RIFE 4.25, and LatentSync 1.5 integrations are implemented but have not been exercised
+against live services, model weights, or CUDA. Production visual quality is therefore not proven.
 
-The product goal is now the first/last-frame generative-video program recorded in `MEMORY.md`. The
-current mock path remains deterministic test infrastructure and is not evidence of generative motion:
-its video stage is an FFmpeg transition between still frames. The next phase must introduce explicit
-generation-method categories, a versioned Asset-ID-based first/last-frame request/result contract,
-durable clip-chain lineage, exact 10-second/60-fps/600-frame delivery QA, and a serious provider
-integration. Do not promote the mock transition to a production capability.
+This file is the authoritative handoff. The durable product goal is in `MEMORY.md`; architecture
+decision ADR 0010 and `docs/provider-decision.md` record the selected current stack.
+The final failure-hypothesis review and resolved findings are in `docs/adversarial-review.md`.
 
-## Exercised milestone
+## Current milestone
 
-The local workflow now supports:
+The application now has an explicit product distinction between:
 
-1. Create a project in the React UI.
-2. Save story text through the API.
-3. Produce a deterministic structured two-scene/four-shot storyboard and auto-approve it for mock use.
-4. Persist a CPU render job across an API restart.
-5. Claim it from a CPU worker, generate immutable versioned assets, and persist a final-render Asset.
-6. View job completion and open the MP4 from the Renders page.
-7. Create/edit characters and mock voices, validate reference uploads, and preview mock speech.
-8. Create, edit, reorder, approve, and delete scenes and shots; inspect/rate/reject/select candidates;
-   and regenerate one shot without replacing its selected candidate.
-9. Upload a consent-acknowledged voice reference, preview mock speech, and delete voice profiles.
+1. mock/test video;
+2. still-image animation;
+3. frame interpolation;
+4. first-frame-only image-to-video;
+5. first-and-last-frame-conditioned generative video;
+6. performance-conditioned/lip-synced video; and
+7. frame-rate conversion/encoding.
 
-The standalone smoke command creates a new Alembic-migrated SQLite database and unique project root.
-It renders four eight-second candidates and a 31.25-second final MP4 after a 0.25-second shared-frame
-trim and 0.5-second crossfade. Every clip and the final output contain 854×480 H.264 video at 24 fps
-and 48 kHz stereo AAC audio. It validates subtitles, thumbnail, contact sheet, manifest, duration,
-stream layout, transition records, and shot-3 continuity from shot 2's extracted actual ending Asset.
+Only category 5 satisfies the generation goal. The deterministic FFmpeg transition provider remains
+useful in CI but advertises mock/test media rendering, not generative-video capability. Production
+chain enqueue discovers and health-checks only a true category-5 provider plus a real interpolator.
 
-## Effective render profiles and OOM recovery
+## Exercised first/last-frame contract and chain
 
-The render-profile reliability phase is implemented without changing the default draft smoke
-workflow:
+- Immutable `FirstLastFrameGenerationRequest` version 1 captures provider/model/version, start and
+  target Asset IDs, prompts, duration, native/delivery FPS, resolution/aspect, seed/motion/camera,
+  identity/audio references, lip-sync/interpolation/safety settings, namespaced provider settings,
+  render profile, fallback policy, retry, and continuation lineage. Its SHA-256 digest is checked at
+  execution and resume.
+- Normalized result facts capture provider Job/model/settings, actual duration/FPS/resolution,
+  native/delivery/checksum and actual boundary/report Assets, provenance, timing, warnings, resource
+  data, and continuity QA.
+- Alembic revision `0004` adds durable `video_chains` and `video_chain_clips` with planned versus
+  actual boundary Assets, predecessor and lineage, immutable snapshots, stage/result Assets, review
+  state, Job/provider IDs, warnings, and failure data.
+- A database uniqueness boundary prevents two conflicting successors in one lineage. Regeneration
+  from an earlier accepted clip creates a new lineage. Failed clips retry without modifying accepted
+  predecessors.
+- Asset input validation enforces project ownership, approved MIME, containment under project root,
+  existence, checksum, and image decode. Client filesystem paths are not accepted. Job input lineage
+  includes start, target, identity, and audio Asset IDs.
+- A deterministic two-clip integration proves each delivery is exactly 10.000 seconds, constant 60
+  fps, and 600 decoded frames; the first clip's decoded actual frame 599 becomes the second start
+  Asset; assembly removes one shared boundary frame and produces exactly 1,199 frames.
+- Restart testing interrupts after native output, resumes from its immutable Asset/checksum, and
+  proves the generation provider is not called again.
 
-- `config/render-profiles.yaml` is loaded through a strict, versioned Pydantic schema. Profile names,
-  even output dimensions, codec names, fallback references, and an acyclic fallback graph are
-  validated. The configured chain is `final -> standard -> draft`.
-- Project create/update and render/regeneration APIs validate configured profiles. The React UI
-  discovers the catalog and provides accessible project-default, per-render, and per-regeneration
-  selectors.
-- Every new render or shot-regeneration Job captures a versioned immutable execution envelope
-  containing requested/effective values and its complete fallback chain. Legacy queued media jobs
-  capture it once at claim. Tests prove a later YAML mutation cannot change queued work and a manual
-  retry resumes the persisted effective profile.
-- The mock render and isolated-shot pipelines apply captured dimensions, frame rate, and codecs to
-  keyframes, candidate video, exact-FPS media QA, normalized transition assembly, immutable Asset
-  provenance, Candidate settings, continuity packets, manifests, and Render records.
-- Mock video encoding and the FFmpeg transition assembler accept the resolved codecs. Asset
-  registration accepts generation parameters so provenance is no longer discarded.
-- The render profile is currently the authority for generated width, height, frame rate, and final
-  codecs. The older `Project.fps` field remains persisted for compatibility but is not an override in
-  this path; the UI describes the profile as the output authority.
-- Only typed adapter-owned OOM classifications from profile-sized image or video generation can enter
-  fallback. Cleanup must be provider-owned and explicitly retry-safe. Fallback advances monotonically
-  through the captured, no-more-demanding chain without changing the Job attempt, queue assignment,
-  or already-held physical-GPU lock. Generic error text is proven not to trigger fallback.
-  Requested-to-effective history is persisted, safely logged, exposed in Job responses, and visible
-  in the job queue.
+The deterministic fixture creates synthetic motion and blends for testability. It is evidence of
+orchestration/media correctness, not real generative visual quality.
 
-The fallback policy is exercised with deterministic protocol fixtures and a real mock FFmpeg render.
-The generic CLI adapter's configured numeric exit-code classification, child reaping, and failed
-partial cleanup are exercised. No WanGP, ComfyUI, or other persistent backend currently qualifies for
-automatic fallback because its structured OOM and VRAM-release behavior has not been exercised.
+## Implemented hosted generation providers
 
-## Persistence and recovery
+### LTX-2.3 Pro — recommended, unexercised
 
-- Migrations `0001` through `0003` contain explicit Alembic operations; application startup does not
-  call `create_all`. Revision `0003` persists worker process generations and heartbeats.
-- Empty SQLite upgrade, `0003` → `0002` downgrade, re-upgrade, and `alembic check` have passed. The
-  resulting database reported WAL mode, revision `0003`, and the `workers` table.
-- SQLite connections enable WAL mode and foreign-key enforcement.
-- Pipeline paths include a unique run ID; provider media is written to partial files and atomically
-  moved. Rerender tests prove the first completed output and checksum remain unchanged.
-- Job claims, completion, and cancellation use conditional update/returning operations. A stale API
-  session cannot overwrite successful completion, and cancellation wins cleanly when committed first.
-- Tests cover failed attempt → API/worker session restart → retry → final Asset, queued and
-  post-claim cancellation, attempt JSONL logs/progress events, and isolated per-shot regeneration.
-- FFmpeg/ffprobe execution polls persisted cancellation while active, terminates with a bounded grace,
-  escalates to kill, and reaps the process. Tests cancel both candidate generation and actual-frame
-  extraction, then prove the cancelled render can be retried to a final Asset.
+The async LTX V2 adapter uses documented first and last Data URI inputs, exact 10-second
+1920×1080/24-fps intent, async submit/poll/download, structured failure types, `Retry-After`, 24-hour
+result retention handling, authenticated health, safe download without credential forwarding,
+bounded output, atomic move, and ffprobe validation. Provider-generated audio is disabled so dialogue
+remains a separate persisted Asset. Protocol fixtures pass.
 
-## Providers
+### Luma Ray 3.2 — fallback, unexercised
 
-### Exercised
+The Luma Agents adapter submits documented first/final keyframes at indices 0/240, polls documented
+states, handles structured errors/rate limits, isolates presigned downloads from auth, and validates
+native media. Protocol fixtures pass.
 
-- Deterministic story planner.
-- Mock PNG image, tone TTS, first/last-frame video, lip-sync passthrough, and interpolation
-  passthrough providers.
-- Conditional lip-sync decisions skip narration, off-camera or mouth-hidden dialogue, explicit skips,
-  and video-provider-integrated lip-sync. Interpolation runs only when requested or when the shot uses
-  an interpolated bridge.
-- FFmpeg media inspection, true last-frame extraction, transition assembly, black/freeze/silence
-  detection, and final validation.
-- Standalone, tested FFmpeg finalization utilities cover soft subtitle muxing, subtitle burning,
-  two-pass EBU R128 loudness normalization, and optional looped/ducked music. These utilities are
-  exercised through immutable render-job snapshots and the web render form.
+Neither reviewed hosted API documents server-side cancellation. Local cancellation stops polling,
+records the remote Job ID, and prevents local publication but may not prevent hosted cost.
 
-### Implemented/configured, not exercised against real backends
+## Delivery and QA
 
-- ComfyUI health, workflow submission, history, and interrupt adapter using documented routes;
-  complete protocol fixtures are missing.
-- WanGP headless adapter using the documented external `wgp.py --process` interface. Argv/input
-  validation is tested; process timeout/cancellation/output collection lacks a protocol fixture. No
-  Gradio route is guessed.
-- Ollama and OpenAI-compatible structured story planners with strict schema validation.
-- Generic administrator-configured CLI image, TTS, and video adapter code using argument arrays
-  without a shell. Numeric OOM classification and cleanup fixtures pass; successful media-generation
-  command fixtures remain missing.
-- YAML provider registry. Disabled adapters appear in discovery without being reported as healthy.
+- Provider-native output is immutable and retains measured native FPS. The system never claims the
+  600-frame delivery is native AI output unless measured as such.
+- Practical-RIFE 4.25 has a safe administrator-path argv adapter with cancellation, timeout, atomic
+  output, exact-FPS validation, configured numeric OOM classification, redaction, and cleanup. Its
+  external runtime is not installed/exercised here.
+- Production delivery rejects frame duplication. It requires enough interpolated frames, trims to an
+  exact timeline, encodes CFR H.264, and proves duration/FPS/decoded count through ffprobe/decoding.
+- QA extracts frames 0, 1, 60, 150, 300, 450, 598, and 599; records normalized MAE, RMSE, global
+  SSIM, perceptual dHash, final-step/snap evidence, exact duplicate/freeze evidence, timing, contact
+  sheet, and a JSON report. LPIPS and privacy-reviewed identity similarity are truthfully marked
+  unavailable in the lightweight environment.
+- Start acceptance is MAE ≤0.02 and SSIM ≥0.97. End acceptance is MAE ≤0.10, SSIM ≥0.80, and dHash
+  similarity ≥0.80. A final SSIM jump over 0.15 or final-step MAE over 0.15 fails the no-snap check.
+  Any failed check marks the clip degraded; degraded clips cannot be accepted.
+- No endpoint replacement, crossfade, visible morph, or forced final-frame overwrite is used as
+  remediation.
 
-### Planned
+## Optional lip sync
 
-- Real image/video/TTS/voice/lip-sync/interpolation/upscaling/audio providers.
-- WanGP MCP transport and backend-native job progress/cancellation.
+LatentSync 1.5 is implemented as a separate local stage using its documented module CLI. The
+contract records eligibility, speaker label, face selection intent, audio Asset, mode, and provider.
+Only one clearly visible speaking face is eligible. Narration/no speaker, hidden mouth, multiple
+faces, no speech, and explicit skip are captured as non-lip-sync decisions. LatentSync has no
+deterministic multi-face selector, and the UI says so.
 
-## Workers and GPUs
+Lip-sync input is interpolated to its documented 25-fps expectation, output is immutable, and the
+official SyncNet evaluator must report confidence ≥3 and AV offset within ±1 frame. The final output
+must contain audio and still pass all start/end delivery QA. Cancellation, timeout, configured OOM,
+partial cleanup, unique evaluator workspace, and safe argv fixtures pass. Real weights/GPU execution
+is unexercised.
 
-CPU, `gpu0`, and `gpu1` worker processes register unique boot generations, publish heartbeats from a
-dedicated thread, and have each been started and stopped cleanly against a migrated database. The API
-merges configured workers with persisted online/stale/busy/stopped state; the dashboard shows the
-online count and whether any worker is busy. A real CPU worker process claimed a persisted mock render
-job, completed one final Asset, and shut down with its worker row cleared and marked stopped.
+## Streaming and assembly
 
-GPU workers map logical queues to independent physical devices, acquire the physical lock before
-probing or claiming, and fail closed without consuming a job attempt when their exact device lacks the
-configured free-VRAM reserve. `nvidia-smi` discovered two NVIDIA GeForce RTX 4070 devices with 12,282
-MB each; the observed free-memory values were 11,149 MB for GPU 0 and 11,858 MB for GPU 1 during the
-latest probe. No CUDA generation workload, model weights, WanGP instance, or ComfyUI instance was
-exercised; discovery and worker startup are not claims of model execution.
+- Accepted active-lineage clips assemble without crossfade. Frame 0 of every successor is removed,
+  avoiding a duplicate shared boundary.
+- Accepted contiguous prefixes publish as immutable MPEG-TS segments and an atomically replaced HLS
+  EVENT playlist. No partial segment is published. The first segment has 600 frames; successors have
+  599 after boundary trimming.
+- Stream state records buffer target/depth, published segment count, provider generation seconds,
+  sustainable real-time factor, whether observed generation keeps up, and exhaustion behavior.
+  Exhaustion is `pause_playback_and_rebuffer`.
+- Pause, resume, cancellation, publication, playlist, and validated segment APIs exist.
+- Automatic next-target creation and continuous asynchronous buffer replenishment remain Planned;
+  this is extensible buffered delivery, not a claim of literal infinity.
 
 ## Frontend
 
-React/Vite/Tailwind/TanStack Query pages cover dashboard worker liveness, projects,
-story/scenes/shots, characters, voice profiles, image/audio reference uploads, candidates, render
-enqueueing, job progress/actions/logs, provider discovery, and render downloads. Scenes and shots have
-keyboard-friendly create/move/delete controls; shot editing includes narration, camera/model, and
-candidate-count settings. A maintained Playwright specification and isolated launcher exercise create
-→ character/voice → save → plan → enqueue → worker → completed render → individual-shot regeneration.
-Frontend lint, Vitest, TypeScript, production build, and that browser workflow pass.
+The React chain workflow supports project/chain creation, manual start/target upload or selection,
+actual-last successor locking, branching from an accepted point, prompt/camera input, provider/model
+capability and authenticated-health gating, profile/GPU selection, fixed delivery explanation,
+speaking-shot classification/audio upload/LatentSync gating, lifecycle states, requested versus
+actual boundary comparison, video review, accept/reject/retry, assembly, HLS publication,
+pause/resume/cancel, and full request/provenance/QA inspection. Unsupported provider combinations are
+disabled or explained.
 
-Still missing: drag-and-drop ordering (accessible move controls are present), administrator provider
-settings editing, manual shot start/end-frame replacement, and the generative chain workflow.
+The older storyboard/candidate/render/finalization workflow remains compatible and exercised.
 
-## Specification phase/gap map
+## Persistence, workers, and GPUs
 
-| Phase | Current evidence | Important remaining gap |
-|---|---|---|
-| 1 — Foundation | API, React app, configuration, migrations, scripts, docs, and CPU tests run | Authentication remains local-only |
-| 2 — Domain/job engine | Persistent queue/retry, atomic terminal states, profile snapshots, typed same-lock OOM fallback, heartbeats, and GPU admission run | PostgreSQL claims, job leases, and configured concurrency |
-| 3 — Mock pipeline | Required four-shot MP4, continuity, subtitles, manifest, assets, reruns, conditional lip-sync, and requested interpolation run | Multiple-candidate generation in one render is not implemented |
-| 4 — UI | Maintained Playwright workflow plus project/story/character/voice/scene/shot/candidate/job/render controls run | Provider settings, manual keyframe replacement, and richer render controls |
-| 5 — Media/continuity | Frame extraction, hard/shared/crossfade assembly, thumbnail/contact sheet, black/freeze/silence QA, and immutable normalize/music/subtitle finalization run | Exact CFR/frame-count and boundary-similarity QA; real interpolation bridges |
-| 6 — Live backends | Planner protocol tests and adapter/config boundaries exist | Complete protocol fixtures and real ComfyUI/WanGP/Ollama exercise |
-| 7 — Linux operations | API and CPU/GPU worker process lifecycle run; scripts/systemd templates exist | Real CUDA/model workload and long-run operations evidence |
-| 8 — Validation | Matrix below passes locally; GitHub Actions run `29207968290` passed | Real backend and CUDA workload evidence |
+- SQLite uses WAL and foreign keys. Production startup does not call `create_all`.
+- Completed stages and generated Assets are versioned, checksummed, and never overwritten.
+- Job claims/terminal transitions/cancellation/retry and worker heartbeats remain restart-safe.
+- CPU, `gpu0`, and `gpu1` worker queues map to independent physical devices and use per-device locks
+  and admission. Two RTX 4070 12,282 MB cards were previously discovered. No pooled VRAM, NVLink, or
+  model-parallel claim is made.
+- RIFE/LatentSync inherit the one worker-visible GPU and never invent an upstream device flag.
+- No real generation, RIFE, or LatentSync CUDA workload has been measured on either device.
 
 ## Validation matrix
 
 | Check | Latest observed result |
 |---|---|
-| `uv sync --extra dev` | Passed; `uv.lock` exists |
-| Empty Alembic upgrade | Passed at revision `0003`; WAL and `workers` table observed |
-| Downgrade/re-upgrade and `alembic check` | Passed; no schema drift |
-| `uv run ruff check .` | Passed |
-| `uv run ruff format --check .` | Passed |
-| `uv run mypy src` | Passed in strict mode |
-| `uv run pytest` | 117 passed |
-| `uv run flipthis-smoke` | Passed with isolated Alembic database |
-| Final `ffprobe` | 31.25 s, H.264 854×480/24 fps, AAC 48 kHz stereo |
-| API real-process health | HTTP 200; clean SIGINT shutdown |
-| CPU/GPU worker process lifecycle | `cpu`, `gpu0`, `gpu1` registered and stopped at revision `0003` |
-| Real CPU worker render | Persisted job succeeded; one output Asset; worker stopped cleanly |
-| Restart/retry/cancellation | Active FFmpeg cancellation, atomic terminal races, retry, and restart pass |
-| GPU discovery/admission | Two independent RTX 4070s discovered; per-device admission tests pass |
-| `pnpm install --frozen-lockfile` | Passed; `pnpm-lock.yaml` exists |
-| `pnpm lint` | Passed with no warnings |
-| `pnpm test` | 11 passed |
-| `pnpm build` | Passed |
-| `./scripts/e2e.sh` | Passed in Chromium through finalization controls, render, and isolated regeneration |
-| Public exposure sweep | No credentials, private assets, generated media, or user-owned skills staged |
-| User-owned skills preservation | `skills.7z` SHA-256 unchanged; nested working content/status preserved |
+| `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
+| Empty Alembic upgrade / downgrade / re-upgrade / check | Passed through revision `0004`; no drift. Application engine probe: WAL, foreign keys `1`, two chain tables |
+| Ruff / formatting / strict MyPy | Passed; 99 files formatted, 64 source files type-checked |
+| Focused FLF/provider/pipeline tests | Passed; 27 provider/contract/pipeline tests after final immutability changes |
+| Complete pytest | Passed; 147 tests in 116.40 seconds |
+| `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
+| Frontend Vitest / lint / build | Passed; 12 tests, ESLint, TypeScript, and Vite production build |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 25.1 seconds |
+| Public exposure/secret sweep | Passed; no credential value, personal path, generated media/database, key file, or sensitive history object found |
+| Real backend acceptance | **Blocked: no hosted credential or external RIFE/LatentSync runtime available** |
 
-## Remaining engineering risks
+## Known limitations and blockers
 
-1. PostgreSQL-specific `FOR UPDATE SKIP LOCKED` claiming is not implemented or exercised.
-2. Typed OOM recovery is exercised for fixtures and the mock render path, but no persistent real
-   backend has proven a structured OOM classifier plus retry-safe VRAM cleanup.
-3. Configured `max_concurrent_jobs` is reported but not enforced; each current worker loop is serial.
-4. A stale heartbeat is deliberately not a job lease. Automatic orphan reconciliation/requeueing is
-   absent because it could duplicate an external generation process.
-5. Audio normalization/mixing and subtitle mux/burn are exercised through the render-job/API/UI path.
-   Transition variants beyond the exercised set remain absent.
-6. Authentication is not implemented. The default localhost bind must not be exposed publicly as-is.
-7. No real model backend or GPU workload has been run, so model VRAM behavior and provider protocols
-   remain unverified.
-8. External model/provider licenses still require provider-specific review. Repository code uses MIT.
-9. The nested `skills` Git repository and `skills.7z` remain user-owned and ignored. Archive and
-   working content are unchanged; reading nested Git status may refresh `.git/index` bookkeeping.
+1. The Definition of Done's real visual acceptance is not met. No live LTX/Luma generation exists,
+   so meaningful motion, coherence, endpoint convergence, identity, and no-snap quality are unproven.
+2. Practical-RIFE and LatentSync are not installed at configured paths. CUDA VRAM/runtime/concurrency,
+   cleanup, and quality are unmeasured.
+3. LPIPS and privacy-reviewed identity similarity are not installed. Current perceptual evidence is
+   dHash plus SSIM/MAE/RMSE.
+4. Hosted generation cannot be remotely cancelled through the reviewed APIs.
+5. Automatic target generation and autonomous streaming replenishment are not implemented.
+6. PostgreSQL `SKIP LOCKED`, true job leases/orphan reconciliation, and enforced configured worker
+   concurrency remain absent.
+7. Authentication remains local-only by default. Do not expose the service publicly as-is.
+8. Exact hosted/model/output/privacy/commercial terms require administrator review before enablement.
 
 ## Next execution order
 
-1. Implement the first/last-frame generative-video contract, durable chain lineage, exact delivery
-   QA, and a current production provider selected from verified primary documentation.
-2. Implement audio-measured speaking-shot duration, multi-candidate render generation, and manual
-   planned start/end-frame upload or replacement without rebuilding completed work.
-3. Finish administrator provider/settings controls and successful-command fixtures for generic CLI
-   media providers; add complete protocol
-   fixtures for ComfyUI and WanGP.
-4. Exercise ComfyUI, WanGP, and Ollama against locally installed backends before enabling them.
-5. Run one real workload on each RTX 4070 independently and record VRAM/health evidence.
+1. Install/enable Practical-RIFE 4.25, fund one LTX account, and run the documented real two-clip
+   acceptance. Inspect actual frames/contact sheets and record cost, timing, FPS, VRAM, and quality.
+2. Fix every real-output QA deficiency, prioritizing natural end convergence and shared-boundary
+   continuity; evaluate provider-native retake/bridge remediation if needed.
+3. Exercise one independent RIFE workload on each RTX 4070, then LatentSync 1.5 on eligible dialogue;
+   record peak VRAM and cleanup behavior.
+4. Add LPIPS and a privacy-reviewed opt-in identity metric as isolated QA providers.
+5. Implement automatic next-target generation and a replenishment controller only after measured
+   real-time factor and buffer sizing are available.

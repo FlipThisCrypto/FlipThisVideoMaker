@@ -27,7 +27,7 @@ def register_asset(
 ) -> Asset:
     info = (
         probe(path, cancel_requested=cancel_requested)
-        if path.suffix.lower() in {".mp3", ".mp4", ".wav", ".mkv", ".mov"}
+        if path.suffix.lower() in {".mp3", ".mp4", ".wav", ".mkv", ".mov", ".ts"}
         else {}
     )
     video: dict[str, Any] = next(
@@ -52,6 +52,8 @@ def register_asset(
             ".wav": "audio/wav",
             ".mp3": "audio/mpeg",
             ".mp4": "video/mp4",
+            ".ts": "video/mp2t",
+            ".m3u8": "application/vnd.apple.mpegurl",
             ".srt": "application/x-subrip",
             ".json": "application/json",
             ".txt": "text/plain",

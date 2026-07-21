@@ -26,6 +26,10 @@ from flipthis_video_maker.api.schemas import (
     RenderRead,
     ShotPatch,
     ShotRead,
+    VideoChainClipCreate,
+    VideoChainClipRead,
+    VideoChainCreate,
+    VideoChainRead,
     VoiceProfileCreate,
     VoiceProfileRead,
     WorkerRead,
@@ -36,6 +40,15 @@ from flipthis_video_maker.config.render_finalization import (
 from flipthis_video_maker.config.render_profiles import RENDER_PROFILE_EXECUTION_KEY
 from flipthis_video_maker.config.settings import Settings, get_settings
 from flipthis_video_maker.config.workers import load_worker_configuration
+from flipthis_video_maker.contracts.video_generation import (
+    CapturedFallbackPolicy,
+    ChainClipState,
+    ChainState,
+    ContinuationMode,
+    FirstLastFrameGenerationRequest,
+    LipSyncMode,
+    RetryContinuation,
+)
 from flipthis_video_maker.database.session import get_db
 from flipthis_video_maker.domain.enums import JobState, ShotStatus
 from flipthis_video_maker.domain.models import (
@@ -47,23 +60,39 @@ from flipthis_video_maker.domain.models import (
     Render,
     Scene,
     Shot,
+    VideoChain,
+    VideoChainClip,
     VoiceProfile,
     Worker,
 )
 from flipthis_video_maker.media.ffmpeg import MediaError
+from flipthis_video_maker.providers.base.models import Capability
 from flipthis_video_maker.providers.planning.deterministic import DeterministicStoryPlanner
 from flipthis_video_maker.providers.registry import (
+    configured_first_last_frame_provider,
+    configured_interpolation_provider,
+    configured_lip_sync_provider,
     configured_story_planner,
     provider_health_records,
     provider_records,
 )
 from flipthis_video_maker.scheduler.gpu import discover_gpus
+from flipthis_video_maker.services.asset_inputs import AssetInputError
 from flipthis_video_maker.services.jobs import request_cancellation, retry
 from flipthis_video_maker.services.planning import apply_story_plan
 from flipthis_video_maker.services.render_finalization import (
     RenderFinalizationInputError,
     capture_render_finalization,
 )
+from flipthis_video_maker.services.video_chains import (
+    VideoChainConflict,
+    accept_chain_clip,
+    assemble_video_chain,
+    create_video_chain,
+    enqueue_chain_clip,
+    reject_chain_clip,
+)
+from flipthis_video_maker.services.video_streaming import publish_hls_buffer
 from flipthis_video_maker.services.workers import list_workers, worker_is_online
 from flipthis_video_maker.storage.assets import register_asset
 from flipthis_video_maker.storage.uploads import UploadValidationError, store_validated_upload
@@ -308,6 +337,361 @@ def enqueue_render(
     return JobRead.model_validate(job)
 
 
+@router.post(
+    "/projects/{project_id}/video-chains",
+    response_model=VideoChainRead,
+    status_code=201,
+)
+def create_chain(project_id: str, body: VideoChainCreate, db: DB) -> VideoChain:
+    project = require(db, Project, project_id)
+    return create_video_chain(db, project, **body.model_dump())
+
+
+@router.get("/projects/{project_id}/video-chains", response_model=list[VideoChainRead])
+def list_video_chains(project_id: str, db: DB) -> list[VideoChain]:
+    require(db, Project, project_id)
+    return list(
+        db.scalars(
+            select(VideoChain)
+            .where(VideoChain.project_id == project_id)
+            .order_by(VideoChain.created_at.desc())
+        )
+    )
+
+
+@router.get("/video-chains/{chain_id}", response_model=VideoChainRead)
+def get_video_chain(chain_id: str, db: DB) -> VideoChain:
+    return require(db, VideoChain, chain_id)
+
+
+@router.get("/video-chains/{chain_id}/clips", response_model=list[VideoChainClipRead])
+def list_video_chain_clips(chain_id: str, db: DB) -> list[VideoChainClip]:
+    require(db, VideoChain, chain_id)
+    return list(
+        db.scalars(
+            select(VideoChainClip)
+            .where(VideoChainClip.chain_id == chain_id)
+            .order_by(
+                VideoChainClip.lineage_version,
+                VideoChainClip.sequence_number,
+                VideoChainClip.revision,
+            )
+        )
+    )
+
+
+@router.post(
+    "/video-chains/{chain_id}/clips",
+    response_model=VideoChainClipRead,
+    status_code=202,
+)
+async def enqueue_video_chain_clip(
+    chain_id: str,
+    body: VideoChainClipCreate,
+    db: DB,
+    settings: Config,
+) -> VideoChainClip:
+    chain = require(db, VideoChain, chain_id)
+    project = require(db, Project, chain.project_id)
+    predecessor = (
+        require(db, VideoChainClip, body.predecessor_clip_id) if body.predecessor_clip_id else None
+    )
+    try:
+        generation_provider = configured_first_last_frame_provider(
+            settings.provider_config,
+            body.provider_id,
+        )
+        provider_info = generation_provider.info()
+        if Capability.FIRST_LAST_FRAME_GENERATIVE_VIDEO not in provider_info.capabilities:
+            raise VideoChainConflict(
+                "Selected provider does not advertise true first/last-frame generation"
+            )
+        unsupported_controls = [
+            label
+            for value, capability, label in (
+                (body.negative_prompt, "negative_prompt", "negative prompt"),
+                (body.seed, "seed", "seed"),
+                (body.motion_strength, "motion_strength", "motion strength"),
+                (
+                    body.identity_reference_asset_ids,
+                    "identity_reference",
+                    "identity references",
+                ),
+            )
+            if value not in {None, "", ()} and capability not in provider_info.supported_inputs
+        ]
+        if unsupported_controls:
+            raise VideoChainConflict(
+                "Selected provider does not support: " + ", ".join(unsupported_controls)
+            )
+        health = await generation_provider.health()
+        if health.get("ok") is not True:
+            raise VideoChainConflict(
+                f"Generation provider health check failed: {health.get('status', 'unknown')}"
+            )
+        if body.interpolation_provider_id is None:
+            raise VideoChainConflict("A production interpolation provider is required")
+        interpolator = configured_interpolation_provider(
+            settings.provider_config,
+            body.interpolation_provider_id,
+        )
+        interpolation_info = interpolator.info()
+        if Capability.INTERPOLATION not in interpolation_info.capabilities:
+            raise VideoChainConflict("Selected delivery provider is not an interpolator")
+        if not interpolation_info.available:
+            raise VideoChainConflict("Interpolation provider runtime is not available")
+        if body.lip_sync_mode is not LipSyncMode.SKIP:
+            if body.lip_sync_mode is not LipSyncMode.LATENTSYNC:
+                raise VideoChainConflict(
+                    "Only the implemented LatentSync post-process is selectable"
+                )
+            if body.lip_sync_provider_id is None:
+                raise VideoChainConflict("Lip sync requires a configured provider")
+            lip_sync_provider = configured_lip_sync_provider(
+                settings.provider_config,
+                body.lip_sync_provider_id,
+            )
+            if Capability.LIP_SYNC not in lip_sync_provider.info().capabilities:
+                raise VideoChainConflict("Selected performance provider is not a lip-sync provider")
+            lip_sync_health = await lip_sync_provider.health()
+            if lip_sync_health.get("ok") is not True:
+                raise VideoChainConflict("Lip-sync provider runtime is not available")
+        if body.fallback_provider_ids:
+            raise VideoChainConflict(
+                "Automatic cross-provider fallback is not implemented for generative clips"
+            )
+        configured_maximum_attempts = settings.max_job_retries + 1
+        if (
+            body.maximum_attempts is not None
+            and body.maximum_attempts != configured_maximum_attempts
+        ):
+            raise VideoChainConflict(
+                "Requested maximum attempts must match the server retry policy"
+            )
+        execution = resolve_render_profile(settings, body.render_profile)
+        if body.provider_id == "luma-ray" and execution.profile.height not in {720, 1080}:
+            raise VideoChainConflict("Ray 3.2 production clips require a 720p or 1080p profile")
+        if body.provider_id.startswith("ltx-") and (
+            execution.profile.width,
+            execution.profile.height,
+        ) != (1920, 1080):
+            raise VideoChainConflict("LTX-2.3 production clips require the 1080p final profile")
+        if execution.profile.fps != body.native_requested_fps:
+            raise VideoChainConflict("Render profile FPS must match provider-native requested FPS")
+        if project.aspect_ratio != "16:9":
+            raise VideoChainConflict(
+                "Current first/last-frame render profiles support only 16:9 chains"
+            )
+        continuation_mode = (
+            ContinuationMode.REGENERATE_FROM_POINT
+            if body.regenerate_from_predecessor
+            else ContinuationMode(chain.continuation_mode)
+        )
+        request = FirstLastFrameGenerationRequest(
+            provider_id=body.provider_id,
+            provider_model=body.provider_model,
+            provider_version=None,
+            start_frame_asset_id=body.start_frame_asset_id,
+            target_end_frame_asset_id=body.target_end_frame_asset_id,
+            prompt=body.prompt,
+            negative_prompt=body.negative_prompt,
+            duration_seconds=body.duration_seconds,
+            native_requested_fps=body.native_requested_fps,
+            delivery_fps=body.delivery_fps,
+            width=execution.profile.width,
+            height=execution.profile.height,
+            aspect_ratio=project.aspect_ratio,
+            seed=body.seed,
+            motion_strength=body.motion_strength,
+            camera_direction=body.camera_direction,
+            identity_reference_asset_ids=body.identity_reference_asset_ids,
+            audio_reference_asset_id=body.audio_reference_asset_id,
+            lip_sync_mode=body.lip_sync_mode,
+            lip_sync_provider_id=body.lip_sync_provider_id,
+            lip_sync_settings=body.lip_sync_settings,
+            interpolation_mode=body.interpolation_mode,
+            interpolation_provider_id=body.interpolation_provider_id,
+            safety=body.safety,
+            provider_settings=body.provider_settings,
+            captured_render_profile=execution.model_dump(mode="json"),
+            captured_fallback_policy=CapturedFallbackPolicy(
+                provider_chain=(body.provider_id, *body.fallback_provider_ids),
+                allow_degraded_generation_category=False,
+                maximum_attempts=configured_maximum_attempts,
+            ),
+            retry_continuation=RetryContinuation(
+                attempt=0,
+                continuation_mode=continuation_mode,
+                predecessor_clip_id=body.predecessor_clip_id,
+            ),
+        )
+        if request.provider_model != provider_info.model_identity:
+            raise VideoChainConflict("Requested model does not match provider capability discovery")
+        clip, _job = enqueue_chain_clip(
+            db,
+            project,
+            chain,
+            request,
+            predecessor=predecessor,
+            new_lineage=body.regenerate_from_predecessor,
+            gpu_assignment=body.gpu_assignment,
+            additional_job_payload={
+                RENDER_PROFILE_EXECUTION_KEY: execution.model_dump(mode="json")
+            },
+        )
+        return clip
+    except AssetInputError as error:
+        status = {
+            "asset_not_found": 404,
+            "asset_project_mismatch": 400,
+            "asset_mime_unsupported": 422,
+            "asset_outside_project": 409,
+            "asset_file_missing": 410,
+            "asset_identity_mismatch": 409,
+            "asset_media_invalid": 422,
+        }[error.code]
+        raise HTTPException(status, str(error)) from error
+    except KeyError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
+@router.post("/video-chain-clips/{clip_id}/accept", response_model=VideoChainClipRead)
+def accept_video_chain_clip(clip_id: str, db: DB) -> VideoChainClip:
+    try:
+        return accept_chain_clip(db, require(db, VideoChainClip, clip_id))
+    except VideoChainConflict as error:
+        raise HTTPException(409, str(error)) from error
+
+
+@router.post("/video-chain-clips/{clip_id}/reject", response_model=VideoChainClipRead)
+def reject_video_chain_clip(clip_id: str, db: DB) -> VideoChainClip:
+    try:
+        return reject_chain_clip(db, require(db, VideoChainClip, clip_id))
+    except VideoChainConflict as error:
+        raise HTTPException(409, str(error)) from error
+
+
+@router.post("/video-chains/{chain_id}/assemble", response_model=AssetRead)
+def assemble_chain(chain_id: str, db: DB) -> Asset:
+    chain = require(db, VideoChain, chain_id)
+    project = require(db, Project, chain.project_id)
+    try:
+        return assemble_video_chain(db, project, chain)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
+@router.post("/video-chains/{chain_id}/stream/publish", response_model=AssetRead)
+def publish_chain_stream(chain_id: str, db: DB) -> Asset:
+    chain = require(db, VideoChain, chain_id)
+    project = require(db, Project, chain.project_id)
+    try:
+        return publish_hls_buffer(db, project, chain)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
+@router.get("/video-chains/{chain_id}/hls/playlist.m3u8")
+def chain_playlist(chain_id: str, db: DB) -> FileResponse:
+    chain = require(db, VideoChain, chain_id)
+    if chain.playlist_asset_id is None:
+        raise HTTPException(404, "Video chain has no published playlist")
+    asset = require(db, Asset, chain.playlist_asset_id)
+    path = Path(asset.file_path)
+    if not path.is_file():
+        raise HTTPException(410, "Published playlist file is missing")
+    return FileResponse(
+        path,
+        media_type="application/vnd.apple.mpegurl",
+        filename="playlist.m3u8",
+    )
+
+
+@router.get("/video-chains/{chain_id}/hls/segments/{filename}")
+def chain_segment(chain_id: str, filename: str, db: DB) -> FileResponse:
+    chain = require(db, VideoChain, chain_id)
+    project = require(db, Project, chain.project_id)
+    if Path(filename).name != filename or not filename.endswith(".ts"):
+        raise HTTPException(400, "Invalid HLS segment name")
+    raw_root = (
+        Path(project.root_asset_directory)
+        / "chains"
+        / chain.id
+        / f"lineage-{chain.active_lineage_version}"
+        / "hls"
+        / "segments"
+    )
+    root = raw_root.resolve(strict=False)
+    raw_path = raw_root / filename
+    path = raw_path.resolve(strict=False)
+    if not path.is_relative_to(root):
+        raise HTTPException(400, "Invalid HLS segment path")
+    asset = db.scalar(select(Asset).where(Asset.file_path.in_({str(raw_path), str(path)})))
+    if asset is None or asset.project_id != project.id:
+        raise HTTPException(404, "HLS segment is not published")
+    if not path.is_file():
+        raise HTTPException(410, "Published HLS segment file is missing")
+    return FileResponse(path, media_type="video/mp2t", filename=filename)
+
+
+@router.post("/video-chains/{chain_id}/pause", response_model=VideoChainRead)
+def pause_chain(chain_id: str, db: DB) -> VideoChain:
+    chain = require(db, VideoChain, chain_id)
+    if chain.state != ChainState.ACTIVE.value:
+        raise HTTPException(409, "Only an active chain can be paused")
+    chain.state = ChainState.PAUSED.value
+    db.commit()
+    return chain
+
+
+@router.post("/video-chains/{chain_id}/resume", response_model=VideoChainRead)
+def resume_chain(chain_id: str, db: DB) -> VideoChain:
+    chain = require(db, VideoChain, chain_id)
+    if chain.state != ChainState.PAUSED.value:
+        raise HTTPException(409, "Only a paused chain can be resumed")
+    chain.state = ChainState.ACTIVE.value
+    db.commit()
+    return chain
+
+
+@router.post("/video-chains/{chain_id}/cancel", response_model=VideoChainRead)
+def cancel_chain(chain_id: str, db: DB) -> VideoChain:
+    chain = require(db, VideoChain, chain_id)
+    if chain.state in {ChainState.COMPLETE.value, ChainState.CANCELLED.value}:
+        raise HTTPException(409, "Video chain is already terminal")
+    clips = list(db.scalars(select(VideoChainClip).where(VideoChainClip.chain_id == chain.id)))
+    for clip in clips:
+        if clip.job_id is None:
+            continue
+        job = db.get(Job, clip.job_id)
+        if job is None or job.state not in {JobState.QUEUED.value, JobState.RUNNING.value}:
+            continue
+        state = request_cancellation(db, job)
+        if state is JobState.CANCELLED:
+            clip.state = ChainClipState.CANCELLED.value
+    chain.state = ChainState.CANCELLED.value
+    db.commit()
+    return chain
+
+
+@router.post("/video-chain-clips/{clip_id}/retry", response_model=JobRead)
+def retry_video_chain_clip(clip_id: str, db: DB, settings: Config) -> Job:
+    clip = require(db, VideoChainClip, clip_id)
+    if clip.job_id is None:
+        raise HTTPException(409, "Video chain clip has no Job")
+    job = require(db, Job, clip.job_id)
+    try:
+        retry(db, job, settings.max_job_retries)
+        clip.state = ChainClipState.QUEUED.value
+        clip.failure_info = {}
+        db.commit()
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return job
+
+
 @router.get("/jobs", response_model=list[JobRead])
 def jobs(db: DB) -> list[Job]:
     return list(db.scalars(select(Job).order_by(Job.created_at.desc())))
@@ -376,6 +760,11 @@ def cancel_job(job_id: str, db: DB) -> dict[str, str]:
         state = request_cancellation(db, job)
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
+    if job.job_type == "video_chain_clip_generation" and state is JobState.CANCELLED:
+        clip = db.scalar(select(VideoChainClip).where(VideoChainClip.job_id == job.id))
+        if clip is not None:
+            clip.state = ChainClipState.CANCELLED.value
+            db.commit()
     return {"state": state.value}
 
 
@@ -386,6 +775,12 @@ def retry_job(job_id: str, db: DB, settings: Config) -> dict[str, str]:
         retry(db, job, settings.max_job_retries)
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
+    if job.job_type == "video_chain_clip_generation":
+        clip = db.scalar(select(VideoChainClip).where(VideoChainClip.job_id == job.id))
+        if clip is not None:
+            clip.state = ChainClipState.QUEUED.value
+            clip.failure_info = {}
+            db.commit()
     return {"state": job.state}
 
 
