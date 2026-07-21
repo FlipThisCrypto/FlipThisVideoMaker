@@ -65,6 +65,11 @@ The selected generator uses only local open-source components:
 ./scripts/install-lpips.sh /absolute/external/lpips/root
 ```
 
+The optional `scripts/run-open-video-acceptance.py` harness uses a pinned, attributed CC BY 3.0
+live-action shot from Blender Foundation's *Tears of Steel* to exercise Wan→RIFE→LPIPS→exact delivery
+without conditioning on intermediate reference frames. Its first representative run passed one-clip
+technical and visual review; real two-clip chaining and broader content coverage remain unproven.
+
 Optional GPU workers use the logical-to-physical mappings in `config/workers.yaml`:
 
 ```bash
@@ -119,8 +124,9 @@ Use the [documentation map](docs/README.md) as the entry point for the full guid
 
 At present, deterministic planning/image/TTS/video providers and the CPU two-clip chain integration
 are exercised. Local Wan2.2 generation has run on GPU 1, and Practical-RIFE 4.25 interpolation has
-run concurrently on GPU 0 and GPU 1 with real weights. Exact delivery and boundary QA pass, but
-visual generation quality remains rejected.
+run concurrently on GPU 0 and GPU 1 with real weights. Exact delivery and boundary QA pass; the
+original synthetic changed-identity test was rejected, while one pinned representative live-action
+clip passed visual review.
 LatentSync 1.5 has a tested argv integration but has not been run against real weights. Ollama and
 OpenAI-compatible planner contracts have protocol tests. Generic CLI numeric OOM classification and
 partial cleanup have protocol fixtures, while successful media commands remain unexercised. ComfyUI

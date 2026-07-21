@@ -12,7 +12,8 @@ adapter is implemented and its isolated ComfyUI runtime, health probe, native ge
 collection, and media inspection are exercised on GPU 1. The first visual artifact was rejected.
 Practical-RIFE 4.25 is exercised with official weights concurrently on both independent GPUs, and
 local LPIPS 0.1/AlexNet boundary QA is exercised on CPU. LatentSync 1.5 remains unexercised.
-Production visual quality is therefore not yet proven.
+A second, pinned CC BY live-action acceptance run passed technical and agent visual review for one
+representative clip. Two-clip real continuity and broader-content production quality remain unproven.
 Continuity-aware target-frame Jobs are exercised with deterministic and safe CLI fixtures; no real
 target-image model is installed. A durable playback-aware replenishment controller is exercised
 with deterministic providers, including concurrent claim, restart reconciliation, failure stop,
@@ -71,6 +72,10 @@ chain enqueue discovers and health-checks only a true category-5 provider plus a
 The deterministic fixture creates synthetic motion and blends for testability. It is evidence of
 orchestration/media correctness, not real generative visual quality.
 
+The real acceptance corpus pins Blender Foundation's CC BY 3.0 *Tears of Steel* 720p source and
+extracts two frames from one uncut live-action shot. Its middle frames are diagnostic only. The
+source and all generated artifacts remain outside Git; ADR 0019 records the decision and license.
+
 ## Local first/last-frame generation provider
 
 ### Wan2.2 I2V-A14B FP8 / ComfyUI
@@ -83,8 +88,9 @@ progress, cancellation, structured PyTorch OOM classification, and retry-safe mo
 
 The external runtime is pinned to ComfyUI v0.9.2 and four checksummed official Wan2.2 files. It runs
 with maximum offload on GPU 1 only. The adapter, live health probe, and native generation are
-**Exercised**; the artifact failed visual production acceptance as recorded below. Hosted providers
-remain disabled compatibility code and are outside the local-only policy.
+**Exercised** twice; the synthetic changed-identity artifact failed, while the pinned live-action
+artifact passed one-clip visual acceptance. Hosted providers remain disabled compatibility code and
+are outside the local-only policy.
 
 
 ## Delivery and QA
@@ -189,13 +195,13 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
 | Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0006`, downgrade to `0005`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, revision `0006` |
-| Ruff / formatting / strict MyPy | Passed; 114 files formatted, 69 source files type-checked |
+| Ruff / formatting / strict MyPy | Passed; 118 files formatted, 69 source files type-checked |
 | Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
 | Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
-| Complete pytest | Passed; 194 tests in 117.71 seconds |
+| Complete pytest | Passed; 202 tests in 115.47 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
 | Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 24.5 seconds |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 23.2 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Local Wan2.2 health | Passed on ComfyUI v0.9.2, GPU 1 isolated as the sole visible RTX 4070, all required nodes/models present |
 | Local 24-fps generation | Failed honestly: 241 frames at 854×480 exhausted the GPU's 11.6 GiB usable VRAM under both low and maximum offload; structured OOM classification passed and no output was published |
@@ -207,12 +213,17 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Local LPIPS 0.1/AlexNet | Passed live CPU health and strict output validation. Real delivery: start distance 0.04379, end 0.02790, identical-frame control approximately zero. Persisted temporary report SHA-256 `6adf832fcf462c6385d6d7682e6edf1dd978db05df80c3e1416af6225a4c3902` |
 | Physical-GPU telemetry | Exercised on GPU 1 during real RIFE: 19.79 s, 143 samples, observed mean period 139 ms / coverage 72.2%, baseline 18 MiB, peak 815 MiB, stage delta 797 MiB, peak utilization 48%, peak temperature 53 C, zero failed samples |
 | Concurrent dual-GPU RIFE | Passed real adapter run with 31.338 s overlap. GPU 0: 34.46 s telemetry window, 580→1,377 MiB, 41% utilization peak, 50 C; GPU 1: 31.34 s, 18→815 MiB, 44%, 53 C. Both stage deltas were 797 MiB; each output was distinct and validated as 641 decoded CFR 60-fps frames at 848×480. |
-| Visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; not evidence of live-action quality or a production pass |
+| Representative live-action acceptance | **Passed one clip:** pinned *Tears of Steel* frames 120.5→130.5 s; coherent generated rise from lying to sitting, stable subjects/scene, no slideshow, cut, crossfade, obvious morph/duplicate, or final snap across all 81 native frames. Native generation 1,034.13 s; full path 1,083.64 s. |
+| Representative exact delivery | Passed: 81 unique CFR 8-fps native frames at 848×480; 641 unique RIFE frames; exactly 10.000 s, CFR 60 fps, and 600 unique delivery frames. Start MAE 0.01572 / SSIM 0.99714 / LPIPS 0.05937; end MAE 0.01667 / SSIM 0.99605 / LPIPS 0.06916; final-step MAE 0.00624. |
+| Representative artifact record | Temporary local root `/tmp/flipthis-tos-acceptance`: native SHA-256 `323906c67129f96c56fb206d7faa7b2d2fe53369344acfb2ca087b5518d00bd0`; delivery `a555cd7d2b4d6a6bfc1a2dc220e13040ce43e5942423132db19407082056031d`; manifest `dc4dcc6c2be4c31c2a61362390644ed5d98c71eb5536fb120c8e66a18d4f9035`; checksum-bound visual review `2e5a56394443fcbe5f7670f72423429f4f0d1745b74574090a92eb70a15dc137`. |
+| Representative GPU telemetry | GPU 1, 1,083.66 s, 7,816 successful samples, 139 ms observed cadence / 72.1% coverage; baseline 177 MiB, peak 5,579 MiB, stage delta 5,402 MiB, peak utilization 100%, peak temperature 83 C, zero failed samples. |
+| Original synthetic visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; retained as evidence that endpoint metrics alone do not prove quality. |
 
 ## Known limitations and blockers
 
-1. The Definition of Done's real visual acceptance is not met. The first native artifact converged
-   on both boundaries but visibly slid/morphed and duplicated its subject near the ending.
+1. One representative live-action clip passes visual and technical acceptance, but the Definition
+   of Done's real two-clip chained acceptance is not met. The earlier synthetic changed-identity
+   artifact remains rejected and demonstrates that quality is content-dependent.
 2. LatentSync is not installed at its configured path. Concurrent independent RIFE execution is
    exercised on both cards, but concurrent Wan2.2 generation and mixed-model scheduling remain
    unmeasured. Sampling can miss allocations shorter than the observed probe cadence.
@@ -229,10 +240,10 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 
 ## Next execution order
 
-1. Improve local Wan conditioning/input strategy until a native artifact passes the no-morph visual
-   gate, then run the documented real two-clip acceptance with the exercised RIFE stage.
-2. Fix every real-output QA deficiency, prioritizing natural end convergence and shared-boundary
-   continuity; evaluate provider-native retake/bridge remediation if needed.
+1. Extend the passing representative artifact into a real two-clip chain using its actual decoded
+   final frame, then prove shared-boundary continuity and 1,199-frame assembly.
+2. Test additional representative motion/content classes and record failures without weakening the
+   established visual gate; evaluate provider-native retakes when a class fails.
 3. Exercise LatentSync 1.5 on eligible dialogue and record sync QA, peak VRAM, and cleanup behavior.
 4. Calibrate LPIPS on representative accepted/rejected local outputs and add a privacy-reviewed
    opt-in identity metric as an isolated QA provider.

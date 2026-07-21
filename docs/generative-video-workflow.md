@@ -7,6 +7,7 @@
 - Local Wan and Practical-RIFE runtimes: **Exercised**. LatentSync: **Implemented, unexercised**.
 - Local LPIPS boundary QA runtime and persisted report integration: **Exercised**.
 - Per-physical-GPU pipeline telemetry and stage provenance: **Exercised** on GPU 1 with RIFE.
+- Pinned open live-action single-clip Wan→RIFE→QA acceptance: **Exercised and visually accepted**.
 - Immutable next-target request/Job/Asset generation and deterministic/CLI fixtures: **Exercised**.
 - Playback-aware replenishment with deterministic target/video providers: **Exercised**.
 - Real target-image model and sustainable real-time replenishment: **Implemented, unexercised**.
@@ -92,6 +93,23 @@ directory. The acceptance record is the two clips' QA JSON/contact sheets, provi
 delivery Assets, final decoded frame lineage, assembled 1,199-frame video, HLS segments, Job logs,
 provider timing, and `nvidia-smi` measurements. A real run passes only if visual inspection confirms
 coherent motion, no disguised slideshow/crossfade, no end snap, and a seamless shared boundary.
+
+For the reproducible single-clip quality corpus, download the official Blender Foundation CC BY 3.0
+720p *Tears of Steel* source and run:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 uv run python scripts/run-open-video-acceptance.py \
+  /absolute/tears_of_steel_720p.mov /absolute/new-acceptance-output \
+  --endpoint http://127.0.0.1:8189 \
+  --workflow "$PWD/config/comfyui-workflows/wan2.2-flf-api-v1.json" \
+  --rife-runtime /absolute/practical-rife \
+  --lpips-runtime /absolute/lpips --physical-gpu 1
+```
+
+The harness refuses a source whose pinned SHA-256 does not match, refuses output overwrite, records
+license/attribution and hashes, and never uses the source's intermediate frames as conditioning.
+After inspecting both contact sheets, record the immutable pass/fail checklist with
+`scripts/record-video-visual-review.py`. A technical pass alone remains pending visual review.
 
 ## Recovery
 

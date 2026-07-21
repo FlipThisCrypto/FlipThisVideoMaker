@@ -1,14 +1,15 @@
 # First/Last-Frame Vertical Slice Adversarial Review
 
-**Review date:** 2026-07-20
+**Review date:** 2026-07-21
 
 **Target:** the `codex/flf-generative-video` vertical slice, including the versioned request/result
 contract, migrations 0004–0006, provider adapters, worker pipeline, media QA, chain persistence, assembly,
 HLS publication, React workflow, tests, and documentation.
 
-**Verdict:** **APPROVE WITH FIXES** as a recoverable implementation checkpoint. Do not approve a
-production release until the documented live two-clip LTX or Luma run plus real RIFE execution
-passes. Protocol fixtures prove contract behavior, not visual generation quality.
+**Verdict:** **APPROVE WITH FIXES** as a recoverable implementation checkpoint. One pinned local
+Wan→RIFE live-action clip passes technical and agent visual review. Do not approve a production
+release until the documented real local two-clip chain also passes. One artifact does not prove
+broad-content quality.
 
 ## Sources of truth
 
@@ -24,8 +25,8 @@ passes. Protocol fixtures prove contract behavior, not visual generation quality
 
 | Failure hypothesis | Evidence and disposition |
 |---|---|
-| A still transition is disguised as generation | Mock FFmpeg output advertises `mock_test_video`; enqueue accepts only providers with the true first/last generative capability. Live visual quality remains unexercised. |
-| A crossfade or last-frame replacement passes as remediation | Production pipeline contains neither remediation; QA measures endpoint convergence and final-step snap. No live provider output has passed this gate yet. |
+| A still transition is disguised as generation | Mock FFmpeg output advertises `mock_test_video`; enqueue accepts only providers with the true first/last generative capability. All 81 native frames of one live-action-conditioned Wan run show continuous generated motion. |
+| A crossfade or last-frame replacement passes as remediation | Production pipeline contains neither remediation; QA measures endpoint convergence and final-step snap. The accepted real artifact shows natural convergence in its dense contact sheet. |
 | The delivery claim is not exactly 600 frames at CFR 60 | Decoded count, duration, average/nominal rate, and every decoded timestamp cadence are checked. An adversarial fixture with false 60/60 metadata and variable timestamps is rejected. |
 | Interpolated frames are mislabeled native | Native and delivery Assets are separate, measured, immutable, and recorded separately in provenance. |
 | A shared boundary is duplicated | Two-clip integration proves 600 + 599 = 1,199 frames in MP4 and HLS; frame 0 is trimmed only from successors. |
@@ -39,7 +40,7 @@ passes. Protocol fixtures prove contract behavior, not visual generation quality
 | Partial or invalid media is published | Providers and media stages use partial files plus atomic moves, validate output, and HLS publishes only accepted clips after segment validation. |
 | Audio disappears during lip sync, assembly, or HLS | Lip-sync integration asserts final audio and SyncNet evidence; assembly and HLS tests assert audio stream preservation. |
 | Unsupported provider controls reach a Job | Capability gating rejects unsupported negative prompt, seed, motion strength, identity references, lip-sync, and interpolation choices before enqueue. The UI exposes only supported controls. |
-| Two 12 GB GPUs are treated as pooled memory | Worker configuration, device locks, and documentation treat them as independent devices. No model-parallel claim is made. Real CUDA concurrency remains unexercised. |
+| Two 12 GB GPUs are treated as pooled memory | Worker configuration, device locks, and documentation treat them as independent devices. A real concurrent RIFE probe maps one child to each card; no model-parallel claim is made. |
 | Finite output is called infinite streaming | The implementation exposes a finite HLS EVENT buffer, pipeline-wall real-time factor, playback-aware one-at-a-time replenishment, and pause/rebuffer exhaustion policy. Sustainable real-time generation remains unproven. |
 | Automatic target generation is an unconditioned or untracked still | Production target providers must advertise image editing, receive the actual continuity Asset as a reference, publish a checksummed child Asset, and checkpoint its immutable request/output. The mock is excluded from production controls. |
 | Two controllers or a restart create duplicate paid work | One relational replenishment-Job slot is claimed conditionally. Concurrent-session and succeeded-Job restart fixtures prove one target and one successor; terminal failure stops for operator retry. |
@@ -60,9 +61,10 @@ passes. Protocol fixtures prove contract behavior, not visual generation quality
 | Medium | API accepted a cross-provider fallback policy that was not executed. | Captured behavior could differ from runtime behavior. | Reject cross-provider fallback until implemented. |
 | Medium | Provider-specific controls could fail only inside the worker. | Unsupported requests could consume queue capacity. | Reject unsupported controls during enqueue from reported capabilities. |
 
-No unresolved P0 or P1 code defect was found in the exercised fixture scope. The absence of a live
-generation, CUDA interpolation, and visual inspection artifact is a production evidence blocker,
-not evidence that the production objective has passed.
+No unresolved P0 or P1 code defect was found in the exercised scope. Live generation, CUDA
+interpolation, exact delivery, and a visual inspection artifact now exist for one representative
+clip. The absence of a real accepted successor and assembled two-clip chain remains a production
+evidence blocker, not evidence that the full objective has passed.
 
 ## Reproduction record
 

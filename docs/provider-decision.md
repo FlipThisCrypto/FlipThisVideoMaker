@@ -1,6 +1,6 @@
 # Generative Video Provider Decision
 
-**Decision date:** 2026-07-20
+**Decision date:** 2026-07-21
 **Evidence rule:** facts in this document come from the linked primary documentation. A blank or
 "not documented" cell is not inferred support.
 
@@ -88,13 +88,12 @@ still pass. Narration with no visible speaker, hidden mouths, multiple faces, no
 skip are recorded as non-lip-sync decisions. LatentSync does not expose deterministic multi-face
 selection, so the UI says so and does not pretend otherwise.
 
-## Assumptions that still require a real run
+## Remaining evidence limits
 
-- One synthetic native run established strong endpoint convergence but failed visual acceptance due
-  to sliding/morphing and duplicate-subject behavior; identity consistency and live-action quality
-  remain unproven.
-- Wan2.2 generation latency, sustainable real-time factor, endpoint convergence, and peak RAM/VRAM
-  must be recorded from completed local outputs rather than inferred from configuration.
-- Practical-RIFE and LatentSync must be run independently on GPU 0 and GPU 1 before concurrency or
-  VRAM claims become Exercised.
+- One pinned live-action run passed endpoint, exact delivery, and agent visual review, while the
+  earlier synthetic changed-identity run failed. Broader content and two-clip continuity remain
+  unproven rather than inferred from a single pass.
+- Wan2.2 measured 1,034.13 seconds for one 10-second native clip; the full RIFE/QA path measured
+  1,083.64 seconds. It is not sustainable real-time generation.
+- Practical-RIFE concurrency is exercised on GPU 0 and GPU 1. LatentSync remains unexercised.
 - Two 12 GB cards are treated as separate devices; no model splitting or pooled 24 GB claim is made.

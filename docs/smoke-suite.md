@@ -58,6 +58,16 @@ expected result, observed result, and stderr; diagnose before changing code.
   checksums, and two independently validated CFR 60-fps outputs. A timeout or malformed child result
   must terminate both process groups. The command refuses to overwrite completed probe outputs.
 
+### Optional P8 — Pinned open live-action generation acceptance
+
+- Setup: download the official Blender Foundation *Tears of Steel* 720p source, start the isolated
+  Wan endpoint, and install Practical-RIFE plus optional LPIPS outside the repository.
+- Action: run `scripts/run-open-video-acceptance.py` with absolute source/runtime/output paths, then
+  inspect both generated contact sheets and use `scripts/record-video-visual-review.py`.
+- Expect: source hash and CC BY attribution recorded; immutable native/interpolated/delivery outputs;
+  exact 10-second/60-fps/600-frame technical QA; all 81 native frames visible; and a separate
+  checksum-bound visual decision. Never treat `pending_human_review` as a production pass.
+
 ## Intake rules
 
 - Every new feature ships with a concrete probe or automated assertion in the same change.

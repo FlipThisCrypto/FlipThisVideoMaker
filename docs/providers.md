@@ -24,10 +24,11 @@ history, supports cancellation, classifies only structured PyTorch OOM, bounds t
 publishes atomically, unloads models, and validates timing with FFmpeg. GPU queue mismatch is rejected
 at both API enqueue and worker execution.
 
-Evidence: **Implemented; runtime and one native generation Exercised** on ComfyUI v0.9.2 and one
-RTX 4070 12 GB. The 81-frame artifact passed technical timing/boundary inspection but failed visual
-production acceptance due to sliding/morphing and late duplicate-subject behavior. Install and
-checksum instructions are in the Linux guide. Model and generated data stay outside Git.
+Evidence: **Implemented; runtime and two native generations Exercised** on ComfyUI v0.9.2 and one
+RTX 4070 12 GB. The first changed-identity synthetic artifact failed visual acceptance. A second
+pinned live-action artifact passed technical and agent visual review across all 81 native frames.
+Broader content and real chained continuity remain unproven. Install and checksum instructions are
+in the Linux guide. Model and generated data stay outside Git.
 
 ### LTX-2.3 Pro hosted API — disabled compatibility adapter
 
