@@ -48,6 +48,16 @@ expected result, observed result, and stderr; diagnose before changing code.
   publish 600/599-frame HLS segments, preserve restartable native output, and exercise optional
   lip-sync lineage/audio/QA without claiming real generative quality.
 
+### Optional P7 — Real independent dual-GPU RIFE acceptance
+
+- Setup: install Practical-RIFE with the repository installer; provide an existing native MP4 and
+  an unused absolute output directory. This is an administrator-run GPU probe, not CPU CI.
+- Action: run `uv run python scripts/verify-dual-gpu-rife.py <absolute-runtime> <absolute-input.mp4>
+  <absolute-output-directory>`.
+- Expect: exit code `0`, positive worker-window overlap, physical GPU identities 0 and 1, reported
+  checksums, and two independently validated CFR 60-fps outputs. A timeout or malformed child result
+  must terminate both process groups. The command refuses to overwrite completed probe outputs.
+
 ## Intake rules
 
 - Every new feature ships with a concrete probe or automated assertion in the same change.

@@ -1,6 +1,6 @@
 # FlipThisVideoMaker Current Status
 
-**Status date:** 2026-07-20
+**Status date:** 2026-07-21
 
 **Repository:** `FlipThisCrypto/FlipThisVideoMaker`
 
@@ -10,8 +10,8 @@
 and exercised with deterministic CPU protocol/integration fixtures. A local Wan2.2 I2V-A14B FP8
 adapter is implemented and its isolated ComfyUI runtime, health probe, native generation, history
 collection, and media inspection are exercised on GPU 1. The first visual artifact was rejected.
-Practical-RIFE 4.25 is exercised with official weights on GPU 1, and local LPIPS 0.1/AlexNet boundary
-QA is exercised on CPU. LatentSync 1.5 remains unexercised.
+Practical-RIFE 4.25 is exercised with official weights concurrently on both independent GPUs, and
+local LPIPS 0.1/AlexNet boundary QA is exercised on CPU. LatentSync 1.5 remains unexercised.
 Production visual quality is therefore not yet proven.
 Continuity-aware target-frame Jobs are exercised with deterministic and safe CLI fixtures; no real
 target-image model is installed. A durable playback-aware replenishment controller is exercised
@@ -177,7 +177,9 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
   and admission. Two RTX 4070 12,282 MB cards were previously discovered. No pooled VRAM, NVLink, or
   model-parallel claim is made.
 - RIFE/LatentSync inherit the one worker-visible GPU and never invent an upstream device flag.
-- Wan2.2 FLF and RIFE CUDA workloads were exercised on GPU 1. LatentSync remains unmeasured.
+- Wan2.2 FLF was exercised on GPU 1. RIFE was exercised concurrently on GPU 0 and GPU 1 with
+  isolated CUDA visibility, workspaces, outputs, and per-card telemetry. This proves independent
+  jobs, not pooled memory or model parallelism. LatentSync remains unmeasured.
 - GPU video Jobs sample the claimed physical device through their pipeline and persist overall plus
   per-stage VRAM/utilization/temperature evidence with observed cadence and coverage.
 
@@ -187,13 +189,13 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
 | Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0006`, downgrade to `0005`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, revision `0006` |
-| Ruff / formatting / strict MyPy | Passed; 112 files formatted, 69 source files type-checked |
+| Ruff / formatting / strict MyPy | Passed; 114 files formatted, 69 source files type-checked |
 | Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
 | Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
-| Complete pytest | Passed; 188 tests in 114.96 seconds |
+| Complete pytest | Passed; 194 tests in 117.71 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
 | Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.3 seconds |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 24.5 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Local Wan2.2 health | Passed on ComfyUI v0.9.2, GPU 1 isolated as the sole visible RTX 4070, all required nodes/models present |
 | Local 24-fps generation | Failed honestly: 241 frames at 854×480 exhausted the GPU's 11.6 GiB usable VRAM under both low and maximum offload; structured OOM classification passed and no output was published |
@@ -204,15 +206,16 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Delivery boundary QA | **Passed:** start MAE 0.0191 / SSIM 0.9960; end MAE 0.0318 / SSIM 0.9966; penultimate-to-final MAE 0.0016; no snap or duplicate/frozen run detected |
 | Local LPIPS 0.1/AlexNet | Passed live CPU health and strict output validation. Real delivery: start distance 0.04379, end 0.02790, identical-frame control approximately zero. Persisted temporary report SHA-256 `6adf832fcf462c6385d6d7682e6edf1dd978db05df80c3e1416af6225a4c3902` |
 | Physical-GPU telemetry | Exercised on GPU 1 during real RIFE: 19.79 s, 143 samples, observed mean period 139 ms / coverage 72.2%, baseline 18 MiB, peak 815 MiB, stage delta 797 MiB, peak utilization 48%, peak temperature 53 C, zero failed samples |
+| Concurrent dual-GPU RIFE | Passed real adapter run with 31.338 s overlap. GPU 0: 34.46 s telemetry window, 580→1,377 MiB, 41% utilization peak, 50 C; GPU 1: 31.34 s, 18→815 MiB, 44%, 53 C. Both stage deltas were 797 MiB; each output was distinct and validated as 641 decoded CFR 60-fps frames at 848×480. |
 | Visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; not evidence of live-action quality or a production pass |
 
 ## Known limitations and blockers
 
 1. The Definition of Done's real visual acceptance is not met. The first native artifact converged
    on both boundaries but visibly slid/morphed and duplicated its subject near the ending.
-2. LatentSync is not installed at its configured path. RIFE and telemetry were exercised only on GPU
-   1; independent GPU 0 and simultaneous dual-queue behavior remain unmeasured. Sampling can miss
-   allocations shorter than the observed probe cadence.
+2. LatentSync is not installed at its configured path. Concurrent independent RIFE execution is
+   exercised on both cards, but concurrent Wan2.2 generation and mixed-model scheduling remain
+   unmeasured. Sampling can miss allocations shorter than the observed probe cadence.
 3. LPIPS is exercised but diagnostic pending representative threshold calibration. A privacy-reviewed
    identity similarity provider is not installed. Torchvision's AlexNet pretrained-weight terms also
    require intended-use review because torchvision disclaims blanket permission for pretrained models.
@@ -230,8 +233,7 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
    gate, then run the documented real two-clip acceptance with the exercised RIFE stage.
 2. Fix every real-output QA deficiency, prioritizing natural end convergence and shared-boundary
    continuity; evaluate provider-native retake/bridge remediation if needed.
-3. Exercise RIFE on GPU 0 and simultaneous independent queues, then LatentSync 1.5 on eligible dialogue;
-   record peak VRAM and cleanup behavior.
+3. Exercise LatentSync 1.5 on eligible dialogue and record sync QA, peak VRAM, and cleanup behavior.
 4. Calibrate LPIPS on representative accepted/rejected local outputs and add a privacy-reviewed
    opt-in identity metric as an isolated QA provider.
 5. Measure the replenishment controller with the real two-clip run, then tune the buffer target and

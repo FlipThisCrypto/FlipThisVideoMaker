@@ -75,7 +75,9 @@ uv run flipthis-worker --device gpu1
 They treat each physical GPU independently and leave jobs queued when that device does not meet the
 configured free-VRAM reserve. Each GPU video Job records sampled baseline/peak VRAM, utilization,
 temperature, stage, and coverage for that physical card only. Starting a GPU worker does not install
-or exercise a model backend.
+or exercise a model backend. The optional administrator-run
+`scripts/verify-dual-gpu-rife.py` probe exercises two concurrent real RIFE adapters and validates
+their device identity, output isolation, overlap, and media results; it does not pool GPU memory.
 
 ## Validation
 
@@ -116,8 +118,9 @@ Use the [documentation map](docs/README.md) as the entry point for the full guid
 - **Planned:** no working protocol behavior exists yet.
 
 At present, deterministic planning/image/TTS/video providers and the CPU two-clip chain integration
-are exercised. Local Wan2.2 generation and Practical-RIFE 4.25 interpolation have been run with real
-weights on GPU 1; exact delivery and boundary QA pass, but visual generation quality remains rejected.
+are exercised. Local Wan2.2 generation has run on GPU 1, and Practical-RIFE 4.25 interpolation has
+run concurrently on GPU 0 and GPU 1 with real weights. Exact delivery and boundary QA pass, but
+visual generation quality remains rejected.
 LatentSync 1.5 has a tested argv integration but has not been run against real weights. Ollama and
 OpenAI-compatible planner contracts have protocol tests. Generic CLI numeric OOM classification and
 partial cleanup have protocol fixtures, while successful media commands remain unexercised. ComfyUI

@@ -75,7 +75,10 @@ while preserving the actual first and last frames. RIFE is `frame_interpolation`
 video. Evidence: **Exercised** with official 4.25 weights on GPU 1: 81 native frames became 641
 unique 60-fps frames in 19.95 seconds, then exactly 600 CFR frames with both endpoints retained.
 An additional instrumented run measured a baseline of 18 MiB and peak of 815 MiB on physical GPU 1
-across 143 successful samples, with the observed cadence and coverage retained in provenance.
+across 143 successful samples, with the observed cadence and coverage retained in provenance. A
+concurrent real-adapter acceptance run then produced separate 641-frame outputs with 31.338 seconds
+of overlap: GPU 0 used 580→1,377 MiB and GPU 1 used 18→815 MiB. Both stage deltas were 797 MiB.
+This proves separate concurrent jobs, not pooled VRAM or model parallelism.
 
 ### LatentSync 1.5
 
