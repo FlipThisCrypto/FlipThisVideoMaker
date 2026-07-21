@@ -20,6 +20,8 @@ from flipthis_video_maker.contracts.video_generation import (
 from flipthis_video_maker.domain.models import Asset, Project
 from flipthis_video_maker.media.ffmpeg import probe, run
 from flipthis_video_maker.media.video_delivery import (
+    decoded_frame_hashes,
+    duplicate_frame_evidence,
     extract_frame_at_index,
     image_similarity,
     inspect_frame_timing,
@@ -338,6 +340,11 @@ async def test_two_clip_pipeline_reuses_actual_last_frame_and_trims_shared_bound
     assert assembled_facts["decoded_frame_count"] == 1199
     assert assembled_facts["average_frame_rate"] == 60
     assert assembled.generation_parameters["shared_boundary_frames_removed"] == 1
+    duplicate = duplicate_frame_evidence(decoded_frame_hashes(Path(assembled.file_path)))
+    assert duplicate["decoded_hash_count"] == 1199
+    assert duplicate["longest_consecutive_run"] <= 6
+    assert assembled.generation_parameters["encoding_preset"] == "medium"
+    assert assembled.generation_parameters["encoding_crf"] == 12
     before = tmp_path / "assembled-599.png"
     after = tmp_path / "assembled-600.png"
     extract_frame_at_index(Path(assembled.file_path), before, 599)

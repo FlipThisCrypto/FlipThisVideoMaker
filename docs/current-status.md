@@ -12,8 +12,9 @@ adapter is implemented and its isolated ComfyUI runtime, health probe, native ge
 collection, and media inspection are exercised on GPU 1. The first visual artifact was rejected.
 Practical-RIFE 4.25 is exercised with official weights concurrently on both independent GPUs, and
 local LPIPS 0.1/AlexNet boundary QA is exercised on CPU. LatentSync 1.5 remains unexercised.
-A second, pinned CC BY live-action acceptance run passed technical and agent visual review for one
-representative clip. Two-clip real continuity and broader-content production quality remain unproven.
+A pinned CC BY live-action acceptance run and its real successor passed technical and agent visual
+review, including persisted actual-frame lineage and a seamless 1,199-frame production assembly.
+Broader-content production quality remains unproven.
 Continuity-aware target-frame Jobs are exercised with deterministic and safe CLI fixtures; no real
 target-image model is installed. A durable playback-aware replenishment controller is exercised
 with deterministic providers, including concurrent claim, restart reconciliation, failure stop,
@@ -68,6 +69,9 @@ chain enqueue discovers and health-checks only a true category-5 provider plus a
   Asset; assembly removes one shared boundary frame and produces exactly 1,199 frames.
 - Restart testing interrupts after native output, resumes from its immutable Asset/checksum, and
   proves the generation provider is not called again.
+- A real two-clip run proves Clip 1's freshly decoded frame 599 Asset is the exact persisted Clip 2
+  start Asset. Both 600-frame deliveries passed technical and visual review; production assembly
+  trims only Clip 2 frame 0 and produces 1,199 unique CFR-60 frames with a visually seamless join.
 
 The deterministic fixture creates synthetic motion and blends for testability. It is evidence of
 orchestration/media correctness, not real generative visual quality.
@@ -88,9 +92,9 @@ progress, cancellation, structured PyTorch OOM classification, and retry-safe mo
 
 The external runtime is pinned to ComfyUI v0.9.2 and four checksummed official Wan2.2 files. It runs
 with maximum offload on GPU 1 only. The adapter, live health probe, and native generation are
-**Exercised** twice; the synthetic changed-identity artifact failed, while the pinned live-action
-artifact passed one-clip visual acceptance. Hosted providers remain disabled compatibility code and
-are outside the local-only policy.
+**Exercised** three times; the synthetic changed-identity artifact failed, while two consecutive
+pinned live-action clips passed visual acceptance. Hosted providers remain disabled compatibility
+code and are outside the local-only policy.
 
 
 ## Delivery and QA
@@ -131,6 +135,8 @@ is unexercised.
 
 - Accepted active-lineage clips assemble without crossfade. Frame 0 of every successor is removed,
   avoiding a duplicate shared boundary.
+- Assembly uses an explicit high-quality H.264 `medium`/CRF-12 encode. The real acceptance found
+  and corrected a lower-quality default that collapsed two subtly different tail frames.
 - Accepted contiguous prefixes publish as immutable MPEG-TS segments and an atomically replaced HLS
   EVENT playlist. No partial segment is published. The first segment has 600 frames; successors have
   599 after boundary trimming.
@@ -195,13 +201,14 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 |---|---|
 | `uv sync --extra dev` | Passed; 45 packages resolved and 44 checked |
 | Empty Alembic upgrade / downgrade / re-upgrade / check | Passed `0001` through `0006`, downgrade to `0005`, re-upgrade, and no-drift check. Application probe: WAL, foreign keys `1`, revision `0006` |
-| Ruff / formatting / strict MyPy | Passed; 118 files formatted, 69 source files type-checked |
+| Ruff / formatting / strict MyPy | Passed; 120 files formatted, 69 source files type-checked |
 | Focused automation/controller tests | Passed; 8 concurrency, restart, failure, playback, QA, and pause/resume tests |
 | Focused Job/worker/provider/API tests | Passed; 45 tests after controller lineage hardening |
-| Complete pytest | Passed; 202 tests in 115.47 seconds |
+| Focused real-chain harness/assembly tests | Passed; 9 tests covering prior-review validation, overwrite refusal, actual-Asset lineage, atomic evidence writes, mandatory successor review, real assembly freeze evidence, and encoding provenance |
+| Complete pytest | Passed; 207 tests in 116.33 seconds |
 | `uv run flipthis-smoke` | Passed; legacy mock render FFprobe: 31.250 s, 750 frames at 24 fps, H.264 + AAC |
 | Frontend Vitest / lint / build | Passed; 15 tests, ESLint, TypeScript, and Vite production build |
-| Playwright | Passed; one complete isolated browser/API/worker workflow in 23.2 seconds |
+| Playwright | Passed; one complete isolated browser/API/worker workflow in 22.8 seconds |
 | Public exposure/secret sweep | Passed across tracked tree/index/history and non-code carriers; local `.env` and generated `projects/` remain ignored |
 | Local Wan2.2 health | Passed on ComfyUI v0.9.2, GPU 1 isolated as the sole visible RTX 4070, all required nodes/models present |
 | Local 24-fps generation | Failed honestly: 241 frames at 854×480 exhausted the GPU's 11.6 GiB usable VRAM under both low and maximum offload; structured OOM classification passed and no output was published |
@@ -217,12 +224,17 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 | Representative exact delivery | Passed: 81 unique CFR 8-fps native frames at 848×480; 641 unique RIFE frames; exactly 10.000 s, CFR 60 fps, and 600 unique delivery frames. Start MAE 0.01572 / SSIM 0.99714 / LPIPS 0.05937; end MAE 0.01667 / SSIM 0.99605 / LPIPS 0.06916; final-step MAE 0.00624. |
 | Representative artifact record | Temporary local root `/tmp/flipthis-tos-acceptance`: native SHA-256 `323906c67129f96c56fb206d7faa7b2d2fe53369344acfb2ca087b5518d00bd0`; delivery `a555cd7d2b4d6a6bfc1a2dc220e13040ce43e5942423132db19407082056031d`; manifest `dc4dcc6c2be4c31c2a61362390644ed5d98c71eb5536fb120c8e66a18d4f9035`; checksum-bound visual review `2e5a56394443fcbe5f7670f72423429f4f0d1745b74574090a92eb70a15dc137`. |
 | Representative GPU telemetry | GPU 1, 1,083.66 s, 7,816 successful samples, 139 ms observed cadence / 72.1% coverage; baseline 177 MiB, peak 5,579 MiB, stage delta 5,402 MiB, peak utilization 100%, peak temperature 83 C, zero failed samples. |
+| Real successor acceptance | **Passed:** Clip 1 actual decoded frame 599 Asset `dc970126-5601-4bf0-a8d4-318e409842ea` is Clip 2's exact persisted start Asset. Clip 2 shows a coherent gaze/weight shift and lean with stable subjects/scene and no slideshow, cut, crossfade, duplicate subject, obvious morph, or endpoint snap across all 81 native frames. Full path: 1,077.62 s. |
+| Real successor exact delivery | Passed: 81 unique CFR-8 native frames, 641 unique RIFE frames, then exactly 600 unique CFR-60 frames at 848×480/10.000 s. Start MAE 0.01492 / SSIM 0.99806 / LPIPS 0.04656; end MAE 0.01498 / SSIM 0.99694 / LPIPS 0.05810; final-step MAE 0.000041. |
+| Real two-clip assembly | **Passed:** H.264 High/yuv420p, 848×480, CFR 60, 19.983333 s, exactly 1,199 decoded unique frames, zero adjacent duplicates, longest frozen run 1. Clip 2 frame 0 was trimmed without crossfade; assembled frame 599→600 join MAE 0.01497 / SSIM 0.99805. Assembly SHA-256 `94bf79d3718a372a51064291603f09aa35adee60e062a62ec95a32f0a14b4754`. |
+| Real chain artifact record | Temporary local root `/tmp/flipthis-tos-chain-acceptance`; persisted SQLite project/chain/Jobs/Assets, native/delivery/contact sheets, visual review, and assembly remain outside Git. Final report SHA-256 `411f823094800911a2d2aa81558fbccd152e73572b14d2e56dd140641e943921`; Clip 2 delivery SHA-256 `35f79ae4861277244516ab5482f32b4b5bce8a541c66479d0c658afb2fb1a02f`. |
+| Real successor GPU telemetry | GPU 1, 1,078.39 s, 7,917 samples, baseline 177 MiB, peak 5,611 MiB, stage delta 5,434 MiB, peak utilization 100%, peak temperature 83 C, observed coverage 73.4%. Runtime shut down cleanly after review. |
 | Original synthetic visual acceptance | **Rejected:** obvious sliding/morphing synthetic subject and brief duplicate subject near the ending; retained as evidence that endpoint metrics alone do not prove quality. |
 
 ## Known limitations and blockers
 
-1. One representative live-action clip passes visual and technical acceptance, but the Definition
-   of Done's real two-clip chained acceptance is not met. The earlier synthetic changed-identity
+1. One representative two-clip live-action chain passes visual, technical, lineage, and assembly
+   acceptance. This does not establish broad-content quality; the earlier synthetic changed-identity
    artifact remains rejected and demonstrates that quality is content-dependent.
 2. LatentSync is not installed at its configured path. Concurrent independent RIFE execution is
    exercised on both cards, but concurrent Wan2.2 generation and mixed-model scheduling remain
@@ -240,12 +252,10 @@ The older storyboard/candidate/render/finalization workflow remains compatible a
 
 ## Next execution order
 
-1. Extend the passing representative artifact into a real two-clip chain using its actual decoded
-   final frame, then prove shared-boundary continuity and 1,199-frame assembly.
-2. Test additional representative motion/content classes and record failures without weakening the
+1. Test additional representative motion/content classes and record failures without weakening the
    established visual gate; evaluate provider-native retakes when a class fails.
-3. Exercise LatentSync 1.5 on eligible dialogue and record sync QA, peak VRAM, and cleanup behavior.
-4. Calibrate LPIPS on representative accepted/rejected local outputs and add a privacy-reviewed
+2. Exercise LatentSync 1.5 on eligible dialogue and record sync QA, peak VRAM, and cleanup behavior.
+3. Calibrate LPIPS on representative accepted/rejected local outputs and add a privacy-reviewed
    opt-in identity metric as an isolated QA provider.
-5. Measure the replenishment controller with the real two-clip run, then tune the buffer target and
+4. Measure the replenishment controller with the real two-clip run, then tune the buffer target and
    add a cross-browser HLS client only if native playback evidence requires it.

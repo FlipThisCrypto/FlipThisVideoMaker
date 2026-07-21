@@ -68,6 +68,18 @@ expected result, observed result, and stderr; diagnose before changing code.
   exact 10-second/60-fps/600-frame technical QA; all 81 native frames visible; and a separate
   checksum-bound visual decision. Never treat `pending_human_review` as a production pass.
 
+### Optional P9 — Persisted real two-clip chain acceptance
+
+- Setup: retain a technically and visually accepted P8 directory, the pinned source, and the same
+  local Wan, Practical-RIFE, and LPIPS runtimes.
+- Action: run `scripts/run-open-chain-acceptance.py generate`, record the Clip 2 visual review, then
+  run `scripts/run-open-chain-acceptance.py finalize` as documented in
+  `docs/generative-video-workflow.md`.
+- Expect: a freshly migrated persistent database; the predecessor's decoded frame 599 Asset reused
+  by exact ID as the successor start; a second real 600-frame reviewed delivery; and production
+  assembly with exactly 1,199 CFR-60 decoded frames, no duplicated join, and checksum-bound lineage
+  and boundary evidence. The command must refuse overwrite, changed input, or missing visual review.
+
 ## Intake rules
 
 - Every new feature ships with a concrete probe or automated assertion in the same change.

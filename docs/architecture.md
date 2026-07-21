@@ -95,7 +95,8 @@ operator retry; pause/cancel and process restarts retain a reconcilable state.
 ## Current execution status
 
 The deterministic CPU mock path and two-clip orchestration fixture are exercised. Local Wan2.2 FLF
-generation is exercised on GPU 1; one pinned live-action clip passes technical and agent visual QA.
-Practical-RIFE 4.25 is exercised concurrently on both independent GPUs. The earlier synthetic
-changed-identity clip remains rejected, real two-clip continuity remains unproven, and LatentSync
-1.5 remains implemented but unexercised. No pooled-memory claim is made.
+generation is exercised on GPU 1; two consecutive pinned live-action clips pass technical and agent
+visual QA. Their persisted actual-frame lineage and 1,199-frame production assembly pass without a
+duplicated shared boundary. Practical-RIFE 4.25 is exercised concurrently on both independent GPUs.
+The earlier synthetic changed-identity clip remains rejected, and LatentSync 1.5 remains implemented
+but unexercised. No pooled-memory claim is made.

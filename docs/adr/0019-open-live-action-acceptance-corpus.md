@@ -38,9 +38,10 @@ subject, scene and identity coherence, and no final-frame snap.
 
 The first single-clip representative run is **Exercised** and passed technical and agent visual
 review. It showed a coherent rise from lying down to sitting upright with stable subjects and scene,
-without a visible cut, crossfade, duplicate, obvious morph, or ending snap. This materially improves
-quality evidence but does not yet prove a chained second clip, arbitrary content, lip sync, or
-sustainable streaming. The 372 MB source and private generated outputs remain local temporary data.
+without a visible cut, crossfade, duplicate, obvious morph, or ending snap. At adoption this did not
+prove a chained second clip; ADR 0020 records the later passing successor and assembly. Neither run
+proves arbitrary content, lip sync, or sustainable streaming. The 372 MB source and generated
+outputs remain local temporary data.
 
 ## Source and license
 

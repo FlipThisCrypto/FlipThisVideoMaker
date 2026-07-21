@@ -90,9 +90,10 @@ selection, so the UI says so and does not pretend otherwise.
 
 ## Remaining evidence limits
 
-- One pinned live-action run passed endpoint, exact delivery, and agent visual review, while the
-  earlier synthetic changed-identity run failed. Broader content and two-clip continuity remain
-  unproven rather than inferred from a single pass.
+- Two consecutive pinned live-action runs passed endpoint, exact delivery, and agent visual review;
+  persisted actual-last-frame chaining and the 1,199-frame production assembly also passed. The
+  earlier synthetic changed-identity run failed, so broader content remains unproven rather than
+  inferred from this representative chain.
 - Wan2.2 measured 1,034.13 seconds for one 10-second native clip; the full RIFE/QA path measured
   1,083.64 seconds. It is not sustainable real-time generation.
 - Practical-RIFE concurrency is exercised on GPU 0 and GPU 1. LatentSync remains unexercised.

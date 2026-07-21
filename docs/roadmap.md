@@ -15,16 +15,17 @@
   restart checkpoint reuse.
 - Playback-aware automatic target/successor scheduling with a single relational ownership slot,
   durable position, QA-gated acceptance, atomic publication, and restart/failure reconciliation.
-- Pinned CC BY live-action acceptance corpus and one technically/visually accepted local Wan clip.
+- Pinned CC BY live-action acceptance corpus, two technically/visually accepted local Wan clips,
+  persisted actual-frame continuation, and an exact 1,199-frame production assembly.
 
-The orchestration items are fixture/integration-proven. One representative real model clip now
-passes; chained and broad-content quality remain evidence gaps.
+The orchestration items are fixture/integration-proven. One representative real two-clip chain now
+passes; broad-content quality remains an evidence gap.
 
 ## Current remaining acceptance boundary
 
-The passing local Wan2.2 clip must be extended through an actual second generation using its decoded
-final frame before real shared-boundary continuity can be claimed. Preserve native/delivery/contact-
-sheet/report artifacts and record the assembled shared boundary without weakening the visual gate.
+The local Wan2.2 chain passes real shared-boundary continuity for one representative shot. The next
+quality boundary is additional motion/content classes, retaining native/delivery/contact-sheet/report
+artifacts and recording failures without weakening the visual gate.
 
 ## Following phases
 

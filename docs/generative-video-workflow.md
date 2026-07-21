@@ -7,7 +7,8 @@
 - Local Wan and Practical-RIFE runtimes: **Exercised**. LatentSync: **Implemented, unexercised**.
 - Local LPIPS boundary QA runtime and persisted report integration: **Exercised**.
 - Per-physical-GPU pipeline telemetry and stage provenance: **Exercised** on GPU 1 with RIFE.
-- Pinned open live-action single-clip Wan→RIFE→QA acceptance: **Exercised and visually accepted**.
+- Pinned open live-action two-clip Wan→RIFE→QA chain and 1,199-frame assembly: **Exercised and
+  visually accepted**.
 - Immutable next-target request/Job/Asset generation and deterministic/CLI fixtures: **Exercised**.
 - Playback-aware replenishment with deterministic target/video providers: **Exercised**.
 - Real target-image model and sustainable real-time replenishment: **Implemented, unexercised**.
@@ -110,6 +111,25 @@ The harness refuses a source whose pinned SHA-256 does not match, refuses output
 license/attribution and hashes, and never uses the source's intermediate frames as conditioning.
 After inspecting both contact sheets, record the immutable pass/fail checklist with
 `scripts/record-video-visual-review.py`. A technical pass alone remains pending visual review.
+
+To reproduce the exercised successor after accepting the first clip, generate into a new directory,
+review both Clip 2 contact sheets with the same review recorder, and finalize the persisted chain:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 uv run python scripts/run-open-chain-acceptance.py generate \
+  /absolute/accepted-clip1 /absolute/tears_of_steel_720p.mov /absolute/new-chain-output \
+  --endpoint http://127.0.0.1:8189 \
+  --workflow "$PWD/config/comfyui-workflows/wan2.2-flf-api-v1.json" \
+  --rife-runtime /absolute/practical-rife --lpips-runtime /absolute/lpips --physical-gpu 1
+uv run python scripts/record-video-visual-review.py \
+  /absolute/new-chain-output/clip2-acceptance --reviewer "local-reviewer" --accept-all
+uv run python scripts/run-open-chain-acceptance.py finalize /absolute/new-chain-output
+```
+
+`generate` creates a fresh migrated database, persists both clips and Jobs, and refuses anything
+except the checksum-bound accepted Clip 1 delivery. `finalize` refuses an unreviewed or changed Clip
+2, accepts it, runs production assembly, and verifies the persisted actual-frame lineage, exact
+1,199-frame contract, freeze evidence, and decoded join mapping.
 
 ## Recovery
 

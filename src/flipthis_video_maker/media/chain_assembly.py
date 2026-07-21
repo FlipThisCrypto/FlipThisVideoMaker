@@ -88,6 +88,10 @@ def assemble_shared_boundary_clips(
             "cfr",
             "-c:v",
             "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "12",
             "-pix_fmt",
             "yuv420p",
             "-movflags",
@@ -124,6 +128,8 @@ def assemble_shared_boundary_clips(
         "shared_boundary_frames_removed": len(clips) - 1,
         "expected_frame_count": expected_frames,
         "assembly_transition": "shared_frame_trim_without_crossfade",
+        "encoding_preset": "medium",
+        "encoding_crf": 12,
         "audio_preserved": include_audio,
     }
 

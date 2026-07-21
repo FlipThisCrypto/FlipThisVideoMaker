@@ -6,10 +6,10 @@
 contract, migrations 0004–0006, provider adapters, worker pipeline, media QA, chain persistence, assembly,
 HLS publication, React workflow, tests, and documentation.
 
-**Verdict:** **APPROVE WITH FIXES** as a recoverable implementation checkpoint. One pinned local
-Wan→RIFE live-action clip passes technical and agent visual review. Do not approve a production
-release until the documented real local two-clip chain also passes. One artifact does not prove
-broad-content quality.
+**Verdict:** **APPROVE WITH FIXES** as a recoverable implementation checkpoint. A pinned local
+two-clip Wan→RIFE live-action chain passes technical and agent visual review, persisted actual-frame
+lineage, and exact shared-boundary assembly. One representative chain does not prove broad-content
+quality or sustainable streaming.
 
 ## Sources of truth
 
@@ -29,8 +29,8 @@ broad-content quality.
 | A crossfade or last-frame replacement passes as remediation | Production pipeline contains neither remediation; QA measures endpoint convergence and final-step snap. The accepted real artifact shows natural convergence in its dense contact sheet. |
 | The delivery claim is not exactly 600 frames at CFR 60 | Decoded count, duration, average/nominal rate, and every decoded timestamp cadence are checked. An adversarial fixture with false 60/60 metadata and variable timestamps is rejected. |
 | Interpolated frames are mislabeled native | Native and delivery Assets are separate, measured, immutable, and recorded separately in provenance. |
-| A shared boundary is duplicated | Two-clip integration proves 600 + 599 = 1,199 frames in MP4 and HLS; frame 0 is trimmed only from successors. |
-| Chaining uses the planned target instead of actual output | Successor enqueue requires the predecessor's persisted decoded frame 599 Asset. The planned target remains separate. |
+| A shared boundary is duplicated | Deterministic integration and a real production assembly prove 600 + 599 = 1,199 frames; the real artifact has 1,199 unique decoded frames, zero adjacent duplicates, and a visually seamless join. Frame 0 is trimmed only from successors. |
+| Chaining uses the planned target instead of actual output | The real successor's planned-start Asset ID exactly equals the predecessor's freshly decoded and persisted frame 599 Asset ID. The planned target remains separate. |
 | Branching loses inherited clips or publishes the wrong branch | Active paths are resolved by predecessor links across lineage versions and tested with an inherited prefix. |
 | Concurrent workers create conflicting successors | Database uniqueness plus service conflict handling prevents two successors for one predecessor and lineage. |
 | Restart recomputes or overwrites completed work | Native, lip-sync-source, lip-sync, RIFE, and delivery stage Assets are checkpointed; a restart test proves native and RIFE are each called once. New stage paths are versioned and writers refuse existing destinations. |
@@ -60,11 +60,12 @@ broad-content quality.
 | Medium | Stream sustainability used provider time rather than end-to-end time. | Buffer claims could ignore interpolation, lip sync, and QA latency. | Record pipeline wall time and derive the conservative real-time factor from it. |
 | Medium | API accepted a cross-provider fallback policy that was not executed. | Captured behavior could differ from runtime behavior. | Reject cross-provider fallback until implemented. |
 | Medium | Provider-specific controls could fail only inside the worker. | Unsupported requests could consume queue capacity. | Reject unsupported controls during enqueue from reported capabilities. |
+| Medium | Default H.264 assembly quality collapsed two subtly different tail frames. | A valid real chain could acquire a short frozen tail during final assembly. | Encode assembly explicitly with `medium`/CRF 12, retain freeze evidence in integration coverage, and rerun the real assembly. The replacement contains 1,199 unique frames. |
 
 No unresolved P0 or P1 code defect was found in the exercised scope. Live generation, CUDA
-interpolation, exact delivery, and a visual inspection artifact now exist for one representative
-clip. The absence of a real accepted successor and assembled two-clip chain remains a production
-evidence blocker, not evidence that the full objective has passed.
+interpolation, exact delivery, visual inspection, persisted actual-frame continuation, and a real
+two-clip assembly now exist for one representative chain. Broad-content quality, real lip sync, and
+sustainable playback-ahead generation remain evidence blockers, not grounds to generalize the pass.
 
 ## Reproduction record
 
